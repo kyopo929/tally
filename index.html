@@ -4542,7 +4542,7 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
     o = o || {};
     const dot = o.hasKids ? '<button type="button" class="ol-dot fold' + (o.folded ? ' folded' : '') + '" data-olfold="' + i + '" title="' + (o.folded ? 'Show details' : 'Hide details') + '" aria-label="' + (o.folded ? 'Show details' : 'Hide details') + '"></button>' : '<span class="ol-dot"></span>';
     const box = l.task ? '<button type="button" class="check small jt' + (l.done ? ' on' : '') + '" data-jtick="' + i + '" aria-label="' + (l.done ? 'Mark not done' : 'Done') + '">' + I.check + '</button>' : '';
-    return '<div class="ol-line' + (o.hidden ? ' hid' : '') + (l.task ? ' istask' + (l.done ? ' isdone' : '') : '') + '" data-lvl="' + l.lvl + '"' + (l.task ? ' data-task="1"' + (l.done ? ' data-done="1"' : '') : '') + ' style="--lvl:' + l.lvl + '">' + dot + box + '<input class="ol-in" data-oli="' + i + '" value="' + esc(l.text) + '"' + (ph ? ' placeholder="' + ph + '"' : '') + ' autocomplete="off" spellcheck="true" aria-label="Journal line">' + (o.chip || '') + '</div>';
+    return '<div class="ol-line' + (o.hidden ? ' hid' : '') + (l.task ? ' istask' + (l.done ? ' isdone' : '') : '') + '" data-lvl="' + l.lvl + '"' + (l.task ? ' data-task="1"' + (l.done ? ' data-done="1"' : '') : '') + ' style="--lvl:' + l.lvl + '">' + dot + box + '<input class="ol-in" data-oli="' + i + '" value="' + esc(l.text) + '"' + (ph ? ' placeholder="' + ph + '"' : '') + ' autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" spellcheck="true" aria-label="Journal line">' + (o.chip || '') + '</div>';
   }
   function linesHtml(n, lines, ph) {
     const hid = hiddenSet(lines, n && n.folds), f = new Set((n && n.folds) || []);
@@ -4725,6 +4725,18 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
   }
   function toggleFold(n, i) { if (!n) return; const ls = parseOutline(n.notes), k = foldKey(ls[i]); const f = new Set(n.folds || []); f.has(k) ? f.delete(k) : f.add(k); n.folds = [...f]; if (!n.folds.length) delete n.folds; save(); }
 
+  // Enter in a journal line: everything after the cursor moves to a new line below, starting with a capital
+  function olSplit(inp) {
+    const ol = inp.closest('.ol'); if (!ol) return;
+    const lines = olRead(ol), i = Number(inp.dataset.oli), pos = inp.selectionStart, end = inp.selectionEnd, l = lines[i];
+    if (!l) return;
+    const after = capFirst(l.text.slice(end).replace(/^\s+/, '')); l.text = l.text.slice(0, pos).replace(/\s+$/, '');
+    const nl = { lvl: (lines[i + 1] && lines[i + 1].lvl > l.lvl && !after) ? l.lvl + 1 : l.lvl, text: after };
+    if (l.task && (l.text.trim() || after)) { nl.task = true; } else if (l.task && !l.text.trim()) { delete l.task; delete l.done; }
+    lines.splice(i + 1, 0, nl); olRedraw(ol, lines, nl.task || !lines[i].task ? i + 1 : i, 0);
+  }
+  const capFirst = t => t.replace(/^([^\p{L}\[]*)(\p{Ll})/u, (m, a, c) => a + c.toUpperCase());
+
   // ---- [[ suggestions (journal lines, notes, task notes) and a Link button for phone keyboards
   function linkNames() {
     const c = {};
@@ -4854,7 +4866,12 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
       if (e.key === 'Enter' && e.target.matches && e.target.matches('.jmeet-in')) { e.preventDefault(); const it = e.target.closest('.jitem'), f = it && it.querySelector('.ol-in'); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } return; }
       const inp = e.target.closest && e.target.closest('.ol-in'); if (!inp) return;
       const ol = inp.closest('.ol'), lines = olRead(ol), i = Number(inp.dataset.oli), pos = inp.selectionStart, end = inp.selectionEnd;
-      if (e.key === 'Enter') { e.preventDefault(); const l = lines[i]; const after = l.text.slice(end); l.text = l.text.slice(0, pos); const nl = { lvl: (lines[i + 1] && lines[i + 1].lvl > l.lvl && !after) ? l.lvl + 1 : l.lvl, text: after }; if (l.task && (l.text.trim() || after)) { nl.task = true; } else if (l.task && !l.text.trim()) { delete l.task; delete l.done; } lines.splice(i + 1, 0, nl); olRedraw(ol, lines, nl.task || !lines[i].task ? i + 1 : i, 0); return; }
+      if (e.key === 'Enter' || e.keyCode === 13) {
+        e.preventDefault();
+        // Phone keyboards may still be finishing the word you tapped into: let them, then split where the cursor really is
+        if (e.isComposing || e.keyCode === 229 || IS_ANDROID) { setTimeout(() => { if (inp.isConnected) olSplit(inp); }, 0); return; }
+        olSplit(inp); return;
+      }
       if (e.key === 'Tab') { e.preventDefault(); if (olShift(lines, i, e.shiftKey ? -1 : 1)) olRedraw(ol, lines, i, pos); return; }
       if (e.key === 'Backspace' && pos === 0 && end === 0) {
         if (lines[i].task) { e.preventDefault(); delete lines[i].task; delete lines[i].done; olRedraw(ol, lines, i, 0); return; } // first Backspace: back to a plain bullet
@@ -4878,6 +4895,7 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
       // typing "[ ]" or "[]" at the start makes it a task line
       const m = !line.dataset.task && inp.value.match(/^\[ ?\]\s/);
       if (m) { const lines = olRead(ol), i = Number(inp.dataset.oli); lines[i].text = inp.value.slice(m[0].length); lines[i].task = true; olRedraw(ol, lines, i, 0); return; }
+      if (!e.isComposing && e.inputType === 'insertText' && inp.value.length === 1 && /\p{Ll}/u.test(inp.value)) { inp.value = inp.value.toUpperCase(); inp.setSelectionRange(1, 1); }
       olSave(ol, olRead(ol));
       ui.olFocus = { id: ol.dataset.olid, iso: ol.dataset.oliso, i: Number(inp.dataset.oli) };
       updateSuggest(inp); refreshLinksRow(inp.closest('.jentry'));
