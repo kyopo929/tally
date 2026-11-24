@@ -988,6 +988,28 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
 .dcard .ncollage.whole .ncell { aspect-ratio: var(--ar) !important; max-height: 440px; background: #fff; }
 .dcard .ncollage.whole .ncell img { object-fit: contain; }
 
+/* Calendar fits the window on any screen: weeks share the height, extra items fold into "+N more" */
+@media (min-width: 601px) {
+  .content.calview .calwrap { min-height: 300px; }
+  .cal-week { flex: 1 1 0; min-height: calc(46px + var(--lanes, 0) * 20px); }
+  .cal-week .cal-day { overflow: hidden; display: flex; flex-direction: column; }
+  .cal-week .cal-items { flex: 1; min-height: 0; overflow: hidden; }
+  .cal-week .cal-items > * { flex-shrink: 0; }
+  .cmore { font-size: 11.5px; color: var(--muted); text-align: left; padding: 1px 6px; border-radius: 5px; flex: none; }
+  .cmore:hover { background: var(--hover); color: var(--ink); }
+}
+/* Short laptop screens: a tighter header leaves more room for the month */
+@media (min-width: 601px) and (max-height: 760px) {
+  .head { padding-top: 14px; }
+  .head h1 { font-size: 23px; }
+  .qa-wrap { padding-top: 8px; }
+  .qa input { padding: 10px 0; }
+  .qa-preview { min-height: 22px; padding-top: 4px; }
+  .content.calview { padding-bottom: 8px; }
+  .content.calview .cal-bar { margin: 6px 0; }
+  .cal-note { display: none; }
+}
+
 </style>
 </head>
 <body>
@@ -4794,6 +4816,27 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
   }
   function goJump(k) { const it = ui.jump && ui.jump.items[k]; closeJump(); if (it) it.go(); }
 
+  // Month view: when a day has more than fits, show what fits plus "+N more" (opens the day)
+  function fitCal() {
+    if (isPhone()) return;
+    document.querySelectorAll('#content .cal-week .cal-day').forEach(day => {
+      const box = day.querySelector('.cal-items'); if (!box) return;
+      box.querySelectorAll('.cmore').forEach(x => x.remove());
+      const kids = [...box.children]; kids.forEach(k => { k.style.display = ''; });
+      if (box.scrollHeight <= box.clientHeight + 1) return;
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'cmore'; more.dataset.dayopen = day.dataset.day; box.appendChild(more);
+      let hid = 0;
+      for (let i = kids.length - 1; i >= 0 && box.scrollHeight > box.clientHeight + 1; i--) { kids[i].style.display = 'none'; hid++; more.textContent = '+' + hid + ' more'; }
+      if (!hid) more.remove();
+    });
+  }
+  function setupCalFit() {
+    const c = $('#content'); if (!c) return;
+    let raf = 0; const go = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitCal); };
+    new MutationObserver(go).observe(c, { childList: true });
+    window.addEventListener('resize', go);
+    go();
+  }
   function bindJournal() {
     document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) { e.preventDefault(); openJump(); return; }
@@ -5034,7 +5077,7 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
   try { const q = new URLSearchParams(location.search).get('open'); if (q) { history.replaceState(null, '', location.pathname); openTask(q); setTimeout(() => openTask(q), 2500); } } catch (e) { }
   if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); bindNoteLists(); bindWaiting(); bindPages(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }

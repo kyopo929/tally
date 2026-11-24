@@ -3448,6 +3448,27 @@
   }
   function goJump(k) { const it = ui.jump && ui.jump.items[k]; closeJump(); if (it) it.go(); }
 
+  // Month view: when a day has more than fits, show what fits plus "+N more" (opens the day)
+  function fitCal() {
+    if (isPhone()) return;
+    document.querySelectorAll('#content .cal-week .cal-day').forEach(day => {
+      const box = day.querySelector('.cal-items'); if (!box) return;
+      box.querySelectorAll('.cmore').forEach(x => x.remove());
+      const kids = [...box.children]; kids.forEach(k => { k.style.display = ''; });
+      if (box.scrollHeight <= box.clientHeight + 1) return;
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'cmore'; more.dataset.dayopen = day.dataset.day; box.appendChild(more);
+      let hid = 0;
+      for (let i = kids.length - 1; i >= 0 && box.scrollHeight > box.clientHeight + 1; i--) { kids[i].style.display = 'none'; hid++; more.textContent = '+' + hid + ' more'; }
+      if (!hid) more.remove();
+    });
+  }
+  function setupCalFit() {
+    const c = $('#content'); if (!c) return;
+    let raf = 0; const go = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitCal); };
+    new MutationObserver(go).observe(c, { childList: true });
+    window.addEventListener('resize', go);
+    go();
+  }
   function bindJournal() {
     document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) { e.preventDefault(); openJump(); return; }
@@ -3688,7 +3709,7 @@
   try { const q = new URLSearchParams(location.search).get('open'); if (q) { history.replaceState(null, '', location.pathname); openTask(q); setTimeout(() => openTask(q), 2500); } } catch (e) { }
   if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); bindNoteLists(); bindWaiting(); bindPages(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }
