@@ -1010,6 +1010,12 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
   .cal-note { display: none; }
 }
 
+/* Journal bullets: one size everywhere (lines with sub-points are clickable, with a bigger invisible tap area) */
+.ol-dot, button.ol-dot { width: 6px; height: 6px; position: relative; }
+button.ol-dot::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
+button.ol-dot.folded { box-shadow: none; }
+.ol-line[style*="--lvl:1"] button.ol-dot.folded, .ol-line[style*="--lvl:3"] button.ol-dot.folded { background: var(--accent); }
+
 </style>
 </head>
 <body>
