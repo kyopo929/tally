@@ -117,7 +117,9 @@
   function parseQuick(input, lists, now, opts) {
     now = now || new Date();
     const today = startOfDay(now);
-    let text = ' ' + input + ' ';
+    // [[Name]] links are kept as they are: a name like [[June]] or [[Friday]] is never read as a date
+    const links = [];
+    let text = ' ' + String(input).replace(/\[\[[^\[\]\n]*\]\]/g, m => '\u27e6' + (links.push(m) - 1) + '\u27e7') + ' ';
     const out = { title: '', due: null, time: null, recur: null, listId: null, listName: null, tags: [], start: null, tokens: [] };
 
     function take(re, fn) {
@@ -295,6 +297,7 @@
 
     out.title = text.replace(/\s+/g, ' ').trim().replace(/^[,.;:\-]+|[,;:\-]+$/g, '').trim();
     if (!out.title) out.title = input.trim();
+    out.title = out.title.replace(/\u27e6(\d+)\u27e7/g, (m, i) => links[i] || m);
 
     if (out.due) out.tokens.unshift({ kind: 'date', text: dueLabel(out.due, now) + (out.end ? ' \u2192 ' + dueLabel(out.end, now) : '') + (out.time && !out.end ? ' ' + fmtTime(out.time) : '') });
     if (out.recur) out.tokens.push({ kind: 'recur', text: recurText(out.recur) });

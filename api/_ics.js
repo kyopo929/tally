@@ -79,7 +79,7 @@ function buildIcs(rows, opts) {
       lines.push('DTSTART;VALUE=DATE:' + dateVal(t.due), 'DTEND;VALUE=DATE:' + nextDay(t.due), 'X-MICROSOFT-CDO-ALLDAYEVENT:TRUE');
     }
     const rr = rrule(t.recur); if (rr) lines.push('RRULE:' + rr);
-    lines.push('SUMMARY:' + esc(t.title));
+    lines.push('SUMMARY:' + esc(String(t.title || '').replace(/\[\[([^\[\]\n]*)\]\]/g, '$1')));
     const desc = [];
     if (l) desc.push('List: ' + l.name + ((t.tags || []).length ? '  ·  ' + t.tags.map(g => '@' + g).join(' ') : ''));
     if (t.steps && t.steps.length) desc.push('Steps:\n' + t.steps.map(s => (s.done ? '[x] ' : '[ ] ') + s.title).join('\n'));

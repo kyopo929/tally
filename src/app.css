@@ -855,6 +855,7 @@ body.filedrag.onnotes #content { outline: 2px dashed var(--accent); outline-offs
 .jsug-i { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 14px; color: var(--ink); }
 .jsug-i svg { width: 14px; height: 14px; color: var(--accent); flex: none; }
 .jsug-i.on, .jsug-i:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.jsug-hint, .jsug-hint:hover { color: var(--muted, #6b7280); background: none; cursor: default; }
 .jsug-hint { font-size: 11px; color: var(--muted); padding: 4px 10px 2px; }
 /* journal tasks, folding, pages, jump */
 button.ol-dot { padding: 0; border: 0; cursor: pointer; width: 7px; height: 7px; }

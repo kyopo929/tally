@@ -166,6 +166,7 @@
   const isEvent = t => t.type === 'event';
   const isNote = t => t.type === 'daynote';
   const isMeet = t => isNote(t) && typeof t.meet === 'string'; // meeting notes: a journal entry with a meeting name
+  const unbr = s => (s || '').replace(/\[\[([^\[\]\n]*)\]\]/g, '$1'); // shows [[Ahmed]] as Ahmed in lists
   const mName = t => (t.meet || '').replace(/\[\[([^\[\]\n]*)\]\]/g, '$1').trim(); // the name without [[ ]], used to group meetings
   const AM = 'T06:00'; // automatic heads-ups (follow-ups, expiries, birthdays): early, before the workday
   const PHONE_MQ = window.matchMedia ? window.matchMedia('(max-width: 600px)') : null;
@@ -486,10 +487,10 @@
     if (t.recur) meta.push('<span>' + I.repeat + esc(D.recurText(t.recur)) + '</span>');
     if (t.reminder) meta.push('<span>' + I.bell + esc(D.reminderLabel(t.reminder)) + '</span>');
     if (t.notes) meta.push('<span>' + I.note + 'Note</span>');
-    if (t.holiday) return '<div class="task event holiday"><span class="evicon" style="color:' + eventColor(t) + '">' + I.star + '</span><div class="tbody" data-dayopen="' + (opts.occ || t.due) + '" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + '</div><div class="tmeta">' + meta.join('') + '</div></div></div>';
+    if (t.holiday) return '<div class="task event holiday"><span class="evicon" style="color:' + eventColor(t) + '">' + I.star + '</span><div class="tbody" data-dayopen="' + (opts.occ || t.due) + '" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta">' + meta.join('') + '</div></div></div>';
     return '<div class="task event' + (ui.selected === t.id ? ' sel' : '') + '" data-id="' + t.id + '"' + (occ ? ' data-occ="' + occ + '"' : '') + ' draggable="false">' +
       '<span class="evicon" title="Event" style="color:' + eventColor(t) + '">' + I.star + '</span>' +
-      '<div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + (ageLabel(t, occ) ? ' <span class="age">' + esc(ageLabel(t, occ)) + '</span>' : '') + '</div><div class="tmeta">' + meta.join('') + '</div></div>' +
+      '<div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + (ageLabel(t, occ) ? ' <span class="age">' + esc(ageLabel(t, occ)) + '</span>' : '') + '</div><div class="tmeta">' + meta.join('') + '</div></div>' +
       '<button type="button" class="iconbtn morebtn" data-act="more" aria-label="More actions">' + I.dots + '</button></div>';
   }
   function noteRow(t) {
@@ -547,8 +548,8 @@
   }
   function repRow(t, c, skipped) {
     const l = listById(t.listId);
-    if (skipped) return '<div class="task done rep skiprow"><span class="check skipcheck">' + I.right + '</span><div class="tbody" data-open="' + t.id + '" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + '</div><div class="tmeta"><span class="skiplbl">Skipped</span><span>' + (c.due ? 'was due ' + esc(D.dueLabel(c.due)) : '') + '</span></div></div></div>';
-    return '<div class="task done rep"><span class="check donecheck">' + I.check + '</span><div class="tbody" data-open="' + t.id + '" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + '</div><div class="tmeta"><span>' + I.repeat + 'Repeating' + (c.due ? ', was due ' + esc(D.dueLabel(c.due)) : '') + '</span>' + (l ? '<span><span class="dot" style="background:' + l.color + ';margin:0;width:8px;height:8px"></span>' + esc(l.name) + '</span>' : '') + '</div></div></div>';
+    if (skipped) return '<div class="task done rep skiprow"><span class="check skipcheck">' + I.right + '</span><div class="tbody" data-open="' + t.id + '" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span class="skiplbl">Skipped</span><span>' + (c.due ? 'was due ' + esc(D.dueLabel(c.due)) : '') + '</span></div></div></div>';
+    return '<div class="task done rep"><span class="check donecheck">' + I.check + '</span><div class="tbody" data-open="' + t.id + '" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span>' + I.repeat + 'Repeating' + (c.due ? ', was due ' + esc(D.dueLabel(c.due)) : '') + '</span>' + (l ? '<span><span class="dot" style="background:' + l.color + ';margin:0;width:8px;height:8px"></span>' + esc(l.name) + '</span>' : '') + '</div></div></div>';
   }
   function empty(title, body) { return '<div class="empty"><strong>' + esc(title) + '</strong>' + esc(body) + '</div>'; }
 
@@ -659,7 +660,7 @@
           '<button type="button" class="chipbtn" data-restore-list="' + l.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-list="' + l.id + '">Delete forever</button></div>';
       }).join('') + '</div></div>';
       if (tt.length) html += '<div class="section"><div class="section-head">Tasks <span class="n">' + tt.length + '</span></div><div class="tasks">' + tt.map(t =>
-        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isPaper(t) ? noteTitle(t) : t.title) + '</div><div class="tmeta"><span>' + (isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
+        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isPaper(t) ? noteTitle(t) : unbr(t.title)) + '</div><div class="tmeta"><span>' + (isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
         '<button type="button" class="chipbtn" data-restore-task="' + t.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-task="' + t.id + '">Delete forever</button></div>').join('') + '</div></div>';
       if (!tl.length && !tt.length) html = empty('Nothing here', 'Deleted tasks and lists wait here for ' + TRASH_DAYS + ' days, in case you change your mind.');
       else actions = '<button type="button" class="chipbtn" data-empty-trash="1">Empty now</button>';
@@ -815,8 +816,8 @@
     const rows = di.spans.filter(sp => !hide.multi || sp.t.holiday).filter(sp => !(sp.t.holiday && hide.hol)).map(sp => eventRow(sp.t, { occ: sp.s })).join('') +
       di.singles.filter(t => !(t.holiday && hide.hol)).map(t => eventRow(t, { occ: pick })).join('') +
       tasksDue.map(t => taskRow(t)).join('') +
-      ghosts.map(t => '<div class="task ghostrow" data-id="' + t.id + '"><span class="check ghostcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + '</div><div class="tmeta"><span>' + I.repeat + 'Repeats' + (t.time ? ' · ' + D.fmtTime(t.time) : '') + '</span></div></div></div>').join('') +
-      skips.map(t => '<div class="task skiprow" data-id="' + t.id + '"><span class="check skipcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(t.title) + '</div><div class="tmeta"><span class="skiplbl">Skipped</span></div></div></div>').join('');
+      ghosts.map(t => '<div class="task ghostrow" data-id="' + t.id + '"><span class="check ghostcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span>' + I.repeat + 'Repeats' + (t.time ? ' · ' + D.fmtTime(t.time) : '') + '</span></div></div></div>').join('') +
+      skips.map(t => '<div class="task skiprow" data-id="' + t.id + '"><span class="check skipcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span class="skiplbl">Skipped</span></div></div></div>').join('');
     h += '<div class="pagenda"><div class="section-head pag-head"><span>' + (pick === T ? 'Today · ' : '') + D.WD_LONG[pd.getDay()] + ', ' + D.MON_SHORT[pd.getMonth()] + ' ' + pd.getDate() + '</span>' +
       '<button type="button" class="sect-act" data-dayopen="' + pick + '">' + (jes.length ? 'Journal' : 'Journal or event') + '</button></div>' +
       (jes.length && !hide.note ? '<div class="pnote" data-jopen="' + pick + '">' + I.journal + '<div class="pnotes">' + jes.map(n => meetHead(n) + (n.notes ? olView(n) : '')).join('<hr class="jsep">') + '</div></div>' : '') +
@@ -834,7 +835,7 @@
     const ov = sp => list.filter(o => o !== sp && o.s <= sp.e && o.e >= sp.s).map(o => o.t.title);
     return '<div class="d-scroll"><div class="d-title"><div class="daytitle">Who’s away in ' + D.MON_SHORT[base.getMonth()] + ' ' + base.getFullYear() + '</div><button type="button" class="iconbtn" data-dact="close" aria-label="Close">' + I.x + '</button></div>' +
       (list.length ? '<div class="tasks">' + list.map(sp => { const o = ov(sp); const n = D.diffDays(D.fromISO(sp.e), D.fromISO(sp.s)) + 1;
-        return '<div class="task awayrow" data-id="' + sp.t.id + '"><span class="dot" style="background:' + eventColor(sp.t) + ';margin-top:6px"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(sp.t.title) + '</div><div class="tmeta"><span>' + esc(D.dueLabel(sp.s)) + ' – ' + esc(D.dueLabel(sp.e)) + ' · ' + n + ' day' + (n === 1 ? '' : 's') + '</span>' + (o.length ? '<span class="ovl">Overlaps ' + esc(o.join(', ')) + '</span>' : '') + '</div></div></div>'; }).join('') + '</div>'
+        return '<div class="task awayrow" data-id="' + sp.t.id + '"><span class="dot" style="background:' + eventColor(sp.t) + ';margin-top:6px"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(sp.t.title)) + '</div><div class="tmeta"><span>' + esc(D.dueLabel(sp.s)) + ' – ' + esc(D.dueLabel(sp.e)) + ' · ' + n + ' day' + (n === 1 ? '' : 's') + '</span>' + (o.length ? '<span class="ovl">Overlaps ' + esc(o.join(', ')) + '</span>' : '') + '</div></div></div>'; }).join('') + '</div>'
         : '<p class="hint">No multi-day events this month.</p>') +
       '<p class="hint">Add time off by typing a range, e.g. “Ali vacation dec 20 - dec 31”.</p></div>';
   }
@@ -1321,7 +1322,8 @@
 
   function bind() {
     $('#qa').addEventListener('input', updatePreview);
-    $('#qa').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFromQuick(); } if (e.key === 'Escape') { e.target.value = ''; updatePreview(); e.target.blur(); } });
+    $('#qa').addEventListener('keydown', e => { if (sug && sug.inp === e.target) return; // the [[ list takes the keys
+      if (e.key === 'Enter') { e.preventDefault(); addFromQuick(); } if (e.key === 'Escape') { e.target.value = ''; updatePreview(); e.target.blur(); } });
     $('#qaMode').addEventListener('click', () => setQaEvent(!ui.qaEvent));
     $('#qaPreview').addEventListener('click', e => { if (e.target.id === 'qaTaskMode') { setQaEvent(false); return; } });
     $('#qaPreview').addEventListener('click', e => { if (e.target.closest('[data-help]')) { openSheet(); return; } const b = e.target.closest('[data-ex]'); if (b) { $('#qa').value = b.dataset.ex; updatePreview(); $('#qa').focus(); } });
@@ -1686,7 +1688,7 @@
     });
     det.addEventListener('keydown', e => {
       const t = taskById(ui.selected); if (!t) return;
-      if (e.target.id === 'dTitle' && e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+      if (e.target.id === 'dTitle' && e.key === 'Enter' && !(sug && sug.inp === e.target)) { e.preventDefault(); e.target.blur(); }
       if (e.target.id === 'dStep' && e.key === 'Enter' && e.target.value.trim()) { t.steps.push({ id: uid(), title: e.target.value.trim(), done: false }); save(); render(); $('#dStep').focus(); }
       if (e.target.id === 'dRecurText' && e.key === 'Enter') {
         const v = e.target.value.trim(); if (!v) return;
@@ -3362,6 +3364,7 @@
     S.tasks.forEach(t => {
       if (isNote(t) || isPage(t) || isPaper(t) || !t.type) linksIn(isPaper(t) ? E(t).body : t.notes).forEach(x => add(x, 2));
       if (isPage(t)) add(t.title, 3);
+      if (!isNote(t) && !isPage(t) && !isPaper(t)) linksIn(t.title).forEach(x => add(x, 2)); // [[Name]] in a task or event title
       if (isMeet(t)) { add(mName(t), 3); linksIn(t.meet).forEach(x => add(x, 2)); }
       if (isDoc(t)) { add(t.holder, 1); add(noteTitle(t), 1); }
       if (isKNote(t) && t.title) add(t.title, 0.5);
@@ -3369,7 +3372,7 @@
     return Object.keys(c).sort((a, b) => c[b] - c[a] || a.localeCompare(b));
   }
   let sug = null;
-  const SUG_FIELDS = '.ol-in, #nBody, #dNotes, .jmeet-in';
+  const SUG_FIELDS = '.ol-in, #nBody, #dNotes, .jmeet-in, #qa, #dTitle, #nTitle';
   function hideSuggest() { sug = null; const b = $('#jsug'); if (b) b.hidden = true; }
   function updateSuggest(inp) {
     const pos = inp.selectionStart, m = inp.value.slice(0, pos).match(/\[\[([^\[\]\n]{0,40})$/);
@@ -3377,7 +3380,15 @@
     const q = m[1].trim().toLowerCase(), names = linkNames();
     const items = names.filter(x => x.toLowerCase().includes(q)).sort((a, b) => (b.toLowerCase().startsWith(q) ? 1 : 0) - (a.toLowerCase().startsWith(q) ? 1 : 0)).slice(0, 6);
     if (q && !names.some(x => x.toLowerCase() === q)) items.push({ create: m[1].trim() });
-    if (!items.length) { hideSuggest(); return; }
+    if (!items.length) {
+      if (q) { hideSuggest(); return; }
+      // Nothing linked yet: say how it works instead of showing nothing
+      let h = $('#jsug'); if (!h) { h = document.createElement('div'); h.id = 'jsug'; h.className = 'jsug'; h.setAttribute('role', 'listbox'); document.body.appendChild(h); }
+      sug = null; h.innerHTML = '<div class="jsug-i jsug-hint">' + I.link + 'Type a name to link it, e.g. [[Ahmed]]</div>';
+      const r0 = inp.getBoundingClientRect(); h.style.left = Math.max(8, Math.min(r0.left, window.innerWidth - 260)) + 'px';
+      const below0 = window.innerHeight - r0.bottom > 220; h.style.top = below0 ? (r0.bottom + 4) + 'px' : 'auto'; h.style.bottom = below0 ? 'auto' : (window.innerHeight - r0.top + 4) + 'px';
+      h.hidden = false; return;
+    }
     let b = $('#jsug'); if (!b) { b = document.createElement('div'); b.id = 'jsug'; b.className = 'jsug'; b.setAttribute('role', 'listbox'); document.body.appendChild(b); }
     sug = { inp, start: pos - m[0].length, end: pos, items, sel: 0 };
     drawSuggest();
@@ -3469,7 +3480,7 @@
     });
     document.addEventListener('input', e => {
       if (e.target.id === 'jumpIn') { ui.jump.sel = e.target.value.trim() ? 0 : -1; drawJump(e.target.value); return; }
-      if (e.target.matches && e.target.matches('#nBody, #dNotes')) { updateSuggest(e.target); return; }
+      if (e.target.matches && e.target.matches('#nBody, #dNotes, #qa, #dTitle, #nTitle')) { updateSuggest(e.target); return; }
       if (e.target.matches && e.target.matches('.jmeet-in')) { const n = taskById(e.target.dataset.jmeetname); if (n) { n.meet = e.target.value; n.title = mName(n) || entryTitle(parseOutline(n.notes)); save(); renderSide(); updateSuggest(e.target); refreshLinksRow(e.target.closest('.jentry'));
         const hd = e.target.closest('.jmeet'), nm = mName(n); let all = hd.querySelector('.jmeet-all');
         if (!nm) { if (all) all.remove(); } else { if (!all) { all = document.createElement('button'); all.type = 'button'; all.className = 'jlink jmeet-all'; all.textContent = 'All'; hd.appendChild(all); } all.dataset.jlink = nm; all.title = 'Every ' + nm + ' meeting'; } if (ui.view === 'calendar' && e.target.closest('#detail')) renderMain(); } return; }

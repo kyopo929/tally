@@ -77,7 +77,7 @@ function dueNow(work, now) {
       if (sent.has(s.endpoint + '|' + t.id + '|' + at)) continue;
       const isEv = t.type === 'event';
       const body = t.waiting && t.reminder && t.reminder.slice(0, 10) === t.waiting.nudge ? 'Waiting on ' + t.waiting.who + '. Time to follow up.' : t.expires ? expText(t.expires, today) : t.expFor && t.due ? expText(t.due, today) : t.due ? (isEv ? '' : 'Due ') + dayLabel(t.due, today) + (t.time ? ' ' + fmtTime(t.time) : '') : 'Reminder';
-      out.push({ endpoint: s.endpoint, sub: s.sub, taskId: t.id, at, payload: { title: t.title || 'Reminder', body, id: t.id, at, event: isEv } });
+      out.push({ endpoint: s.endpoint, sub: s.sub, taskId: t.id, at, payload: { title: String(t.title || '').replace(/\[\[([^\[\]\n]*)\]\]/g, '$1') || 'Reminder', body, id: t.id, at, event: isEv } });
     }
   }
   return out;
