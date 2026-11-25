@@ -964,7 +964,7 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
 .noteedit .nrich { font-size: 14px; }
 .nrich-wrap { cursor: text; border-radius: 8px; padding: 4px 2px; min-height: 60px; }
 .nrich-wrap:hover { background: color-mix(in srgb, var(--line) 30%, transparent); }
-.nr-l { display: flex; align-items: flex-start; gap: 8px; padding-left: calc(var(--ind, 0) * 8px); word-break: break-word; }
+.nr-l { display: flex; align-items: flex-start; gap: 8px; padding-left: calc(var(--ind, 0) * 22px); word-break: break-word; }
 .nr-l.done > span { text-decoration: line-through; color: var(--muted); }
 .nbox { width: 16px; height: 16px; border: 1.6px solid color-mix(in srgb, var(--ink) 55%, transparent); border-radius: 4px; display: grid; place-items: center; flex: none; margin-top: 2px; color: transparent; padding: 0; background: transparent; }
 .nbox svg { width: 11px; height: 11px; stroke-width: 3; }
@@ -1122,3 +1122,6 @@ button.ol-dot.folded { box-shadow: none; }
 .jahead-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jside-none { margin: 0; font-size: 12px; }
 .jtoday.jfuture { background: var(--accent-soft); color: var(--accent); }
+.nbul.l1 { background: transparent; border: 1.3px solid currentColor; width: 6px; height: 6px; }
+.nbul.l2 { border-radius: 1px; }
+.nbody-in { tab-size: 4; }

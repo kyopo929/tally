@@ -2992,12 +2992,15 @@
   // ---- checkboxes and bullets inside a text note ("[ ] " / "[x] " / "• " at the start of a line)
   const NCHK = /^(\s*)\[( |x|X)\]\s?/, NBUL = /^(\s*)[•\-*]\s+/;
   const hasRich = t => /^\s*(\[( |x|X)\]|[•\-*]\s)/m.test(t || '');
+  // Indent levels: 4 spaces (or a tab) per level, from Tab / Shift+Tab in the note
+  const nLvl = ws => Math.min(4, Math.floor(ws.replace(/\t/g, '    ').length / 4));
   function richBody(text, id) {
     return '<div class="nrich">' + (text || '').split('\n').map((l, i) => {
       let m;
-      if ((m = l.match(NCHK))) { const done = m[2] !== ' '; return '<div class="nr-l chk' + (done ? ' done' : '') + '" style="--ind:' + m[1].length + '"><button type="button" class="nbox' + (done ? ' on' : '') + '" data-nchk="' + id + ':' + i + '" aria-label="' + (done ? 'Uncheck' : 'Check') + '">' + I.check + '</button><span>' + linkify(l.slice(m[0].length)) + '</span></div>'; }
-      if ((m = l.match(NBUL))) return '<div class="nr-l bul" style="--ind:' + m[1].length + '"><span class="nbul"></span><span>' + linkify(l.slice(m[0].length)) + '</span></div>';
-      return '<div class="nr-l">' + (l.trim() ? linkify(l) : '&nbsp;') + '</div>';
+      if ((m = l.match(NCHK))) { const done = m[2] !== ' '; return '<div class="nr-l chk' + (done ? ' done' : '') + '" style="--ind:' + nLvl(m[1]) + '"><button type="button" class="nbox' + (done ? ' on' : '') + '" data-nchk="' + id + ':' + i + '" aria-label="' + (done ? 'Uncheck' : 'Check') + '">' + I.check + '</button><span>' + linkify(l.slice(m[0].length)) + '</span></div>'; }
+      if ((m = l.match(NBUL))) return '<div class="nr-l bul" style="--ind:' + nLvl(m[1]) + '"><span class="nbul l' + (nLvl(m[1]) % 3) + '"></span><span>' + linkify(l.slice(m[0].length)) + '</span></div>';
+      const ws = l.match(/^\s*/)[0];
+      return '<div class="nr-l"' + (l.trim() && nLvl(ws) ? ' style="--ind:' + nLvl(ws) + '"' : '') + '>' + (l.trim() ? linkify(l.slice(ws.length)) : '&nbsp;') + '</div>';
     }).join('') + '</div>';
   }
   const noteTools = () => '<div class="ntools"><button type="button" class="chipbtn" data-nins="chk" title="Checkbox on this line">' + I.check + 'Checkbox</button><button type="button" class="chipbtn" data-nins="bul" title="Bullet on this line"><span class="nbul"></span>Bullet</button></div>';
@@ -3514,12 +3517,30 @@
         const c = Math.max(a, pos + add.length - cut); ta.setSelectionRange(c, c); fire(ta);
       }
     }, true);
+    // Tab / Shift+Tab: indent or outdent the line (or every selected line) by one level (4 spaces)
+    document.addEventListener('keydown', e => {
+      if (e.target.id !== 'nBody' || e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey || (sug && sug.inp === e.target)) return;
+      e.preventDefault();
+      const ta = e.target, v = ta.value, s0 = ta.selectionStart, s1 = ta.selectionEnd;
+      const a = v.lastIndexOf('\n', s0 - 1) + 1, bi = v.indexOf('\n', Math.max(s1 - (s1 > s0 && v[s1 - 1] === '\n' ? 1 : 0), s0)), b = bi < 0 ? v.length : bi;
+      const lines = v.slice(a, b).split('\n'); let d0 = 0, dAll = 0;
+      const out = lines.map((l, k) => {
+        if (!e.shiftKey) { if (nLvl(l.match(/^\s*/)[0]) >= 4) return l; if (k === 0) d0 = 4; dAll += 4; return '    ' + l; }
+        const cut = (l.match(/^( {1,4}|\t)/) || [''])[0].length; if (k === 0) d0 = -cut; dAll -= cut; return l.slice(cut);
+      });
+      ta.setRangeText(out.join('\n'), a, b, 'preserve');
+      if (s0 === s1) { const c = Math.max(a, s0 + d0); ta.setSelectionRange(c, c); } else ta.setSelectionRange(Math.max(a, s0 + d0), s1 + dAll);
+      fire(ta); autosize(ta);
+    });
     document.addEventListener('keydown', e => {
       if (e.target.id !== 'nBody' || e.key !== 'Enter' || e.shiftKey || (sug && sug.inp === e.target)) return;
       const ta = e.target, v = ta.value, pos = ta.selectionStart, { a } = lineAt(v, pos), line = v.slice(a, pos);
       const m = line.match(NCHK) || line.match(NBUL); if (!m) return;
       e.preventDefault();
-      if (!line.slice(m[0].length).trim()) { ta.setRangeText('', a, pos, 'end'); fire(ta); return; } // empty item ends the list
+      if (!line.slice(m[0].length).trim()) { // empty item: a sub-item moves out a level; a top item ends the list
+        if (m[1]) { const cut = (m[1].match(/( {1,4}|\t)$/) || [''])[0].length; ta.setRangeText(line.slice(0, m[1].length - cut) + line.slice(m[1].length), a, pos, 'end'); fire(ta); return; }
+        ta.setRangeText('', a, pos, 'end'); fire(ta); return;
+      }
       const next = NCHK.test(line) ? m[1] + '[ ] ' : m[1] + '• ';
       ta.setRangeText('\n' + next, pos, ta.selectionEnd, 'end'); fire(ta); autosize(ta);
     });
