@@ -1877,7 +1877,7 @@ button.ol-dot.folded { box-shadow: none; }
   /* ---------- sidebar boxes: weather, clocks, stocks, prayer, top stories, Dubai (computer only, original site only) ---------- */
   // Settings → Sidebar boxes. Saved on this computer only (not in the code or the synced data).
   const NEWS_KEY = 'tally-news', NEWS_EVERY = 10 * 60000, SIDE_KEY = 'tally-side', HIDE_KEY = 'tally-news-hidden';
-  const SIDE_DEFS = [['weather', 'Weather (Dubai)'], ['clocks', 'Clocks: Dubai, Los Angeles, Seoul'], ['stocks', 'Stocks'], ['prayer', 'Prayer times: Asr, Maghrib, Isha (IACAD)'], ['news', 'Top stories'], ['dubai', 'Dubai news']];
+  const SIDE_DEFS = [['weather', 'Weather (Dubai)'], ['clocks', 'Clocks: Dubai, Los Angeles, Seoul'], ['stocks', 'Stocks'], ['prayer', 'Prayer times: Asr, Maghrib, Isha (Dubai)'], ['news', 'Top stories'], ['dubai', 'Dubai news']];
   const SIDE_NAME = Object.fromEntries(SIDE_DEFS);
   const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
@@ -1969,24 +1969,33 @@ button.ol-dot.folded { box-shadow: none; }
     } catch (e) { }
   }
 
-  // Prayer times (IACAD, Dubai)
+  // Prayer times (Dubai)
   function prayerHtml() {
     const p = news && news.prayer, today = zoneNow('Asia/Dubai'), d = p && p.days && p.days[today.date];
-    if (!d) return head('Prayer times · IACAD') + '<div class="stock-note">' + (p && p.err ? 'Couldn’t reach IACAD. Trying again soon.' : 'Loading…') + '</div>';
+    if (!d) return head('Prayer times · Dubai') + '<div class="stock-note">' + (p && p.err ? 'Couldn’t load prayer times. Trying again soon.' : 'Loading…') + '</div>';
     const now = today.h * 60 + today.m, mins = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
     const list = [['Asr', d.asr], ['Maghrib', d.maghrib], ['Isha', d.isha]];
     const next = list.find(x => mins(x[1]) > now);
-    return head('Prayer times · IACAD') + '<ul class="pray">' + list.map(([n, hm]) => {
+    return head('Prayer times · Dubai') + '<ul class="pray">' + list.map(([n, hm]) => {
       const left = mins(hm) - now, isNext = next && next[0] === n;
       return '<li class="' + (isNext ? 'next' : left <= 0 ? 'past' : '') + '"><span>' + n + '</span><b>' + t12(hm) + '</b>' + (isNext ? '<em>in ' + (left >= 60 ? Math.floor(left / 60) + 'h ' : '') + (left % 60) + 'm</em>' : '<em></em>') + '</li>';
     }).join('') + '</ul>';
   }
+  // Aladhan's Dubai method (IACAD blocks outside access). Against IACAD's official times it is within a minute:
+  // Asr and Isha match on most days, and Maghrib comes out one minute early, so we add that minute back.
   async function refreshPrayer() {
     const today = zoneNow('Asia/Dubai').date;
     if (news.prayer && news.prayer.days && news.prayer.days[today] && Date.now() - news.prayer.at < 12 * 3600000) return;
     try {
-      const r = await fetch('/api/prayer', { cache: 'no-store' }); const j = r.ok ? await r.json() : null;
-      news.prayer = j && j.days ? { at: Date.now(), days: j.days } : Object.assign({}, news.prayer, { err: true });
+      const [y, m] = today.split('-');
+      const r = await fetch('https://api.aladhan.com/v1/calendarByCity/' + y + '/' + Number(m) + '?city=Dubai&country=AE&method=16', { cache: 'no-store' });
+      const j = r.ok ? await r.json() : null, days = {};
+      const hm = (v, add) => { const [h, mm] = String(v || '').slice(0, 5).split(':').map(Number); const t = h * 60 + mm + (add || 0); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+      for (const d of (j && j.data) || []) {
+        const g = String(d.date && d.date.gregorian && d.date.gregorian.date || '').split('-'); if (g.length !== 3) continue;
+        days[g[2] + '-' + g[1] + '-' + g[0]] = { asr: hm(d.timings.Asr), maghrib: hm(d.timings.Maghrib, 1), isha: hm(d.timings.Isha) };
+      }
+      news.prayer = Object.keys(days).length ? { at: Date.now(), days } : Object.assign({}, news.prayer, { err: true });
     } catch (e) { news.prayer = Object.assign({}, news.prayer, { err: true }); }
   }
 
