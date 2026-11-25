@@ -1,23 +1,31 @@
-// GET /api/news → Google News "Top stories" (US edition) for the sidebar on computers.
+// GET /api/news → for the sidebar on computers:
+//   stories:  Google News "Top stories" (US edition)
+//   breaking: stories from the last 90 minutes (top stories + Google News "breaking" search)
+//   trending: Google Trends "Trending now" (US) with the top article for each search
 // Only the original site serves it; copies of Tally get 404 and the sidebar box stays hidden.
 'use strict';
 const { isOriginal } = require('./_cfg');
-const { parseNews } = require('./_news');
-const SOURCE = 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en';
+const { parseNews, parseTrends, pickBreaking } = require('./_news');
+const G = 'hl=en-US&gl=US&ceid=US:en';
+const TOP = 'https://news.google.com/rss?' + G;
+const BREAKING = 'https://news.google.com/rss/search?q=' + encodeURIComponent('breaking when:2h') + '&' + G;
+const TRENDS = 'https://trends.google.com/trending/rss?geo=US';
 
+async function get(url) {
+  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Tally)' } });
+  if (!r.ok) throw new Error('source ' + r.status);
+  return r.text();
+}
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (!isOriginal(req)) { res.statusCode = 404; return res.end(JSON.stringify({ error: 'Not available' })); }
-  try {
-    const r = await fetch(SOURCE, { headers: { 'User-Agent': 'Mozilla/5.0 (Tally)' } });
-    if (!r.ok) throw new Error('source ' + r.status);
-    const stories = parseNews(await r.text(), 8);
-    if (!stories.length) throw new Error('empty');
-    res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600'); // Vercel keeps it 15 min
-    res.statusCode = 200;
-    res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), stories }));
-  } catch (e) {
-    res.statusCode = 502;
-    res.end(JSON.stringify({ error: 'News unavailable' }));
-  }
+  const [top, brk, trd] = await Promise.allSettled([get(TOP), get(BREAKING), get(TRENDS)]);
+  const all = top.status === 'fulfilled' ? parseNews(top.value, 30) : [];
+  const stories = all.slice(0, 8);
+  const breaking = pickBreaking([all, brk.status === 'fulfilled' ? parseNews(brk.value, 20) : []], 90, 6);
+  const trending = trd.status === 'fulfilled' ? parseTrends(trd.value, 8) : [];
+  if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
+  res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min
+  res.statusCode = 200;
+  res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), stories, breaking, trending }));
 };

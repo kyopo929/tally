@@ -28,4 +28,30 @@ function parseNews(xml, max) {
   }
   return out;
 }
-module.exports = { parseNews };
+// Google Trends "Trending now" RSS → [{ term, title, source, url, traffic }] (the top news article for each search)
+function parseTrends(xml, max) {
+  const out = [];
+  const items = String(xml || '').match(/<item>[\s\S]*?<\/item>/gi) || [];
+  for (const it of items) {
+    const term = tag(it, 'title');
+    const ni = it.match(/<ht:news_item>[\s\S]*?<\/ht:news_item>/i);
+    const url = ni ? tag(ni[0], 'ht:news_item_url') : '';
+    if (!term || !/^https:\/\//i.test(url)) continue;
+    out.push({ term, title: tag(ni[0], 'ht:news_item_title'), source: tag(ni[0], 'ht:news_item_source'), url, traffic: tag(it, 'ht:approx_traffic') });
+    if (out.length >= (max || 8)) break;
+  }
+  return out;
+}
+// Breaking = stories from the last `mins` minutes, newest first, no repeats
+function pickBreaking(lists, mins, max, now) {
+  const seen = new Set(), out = [], cut = (now || Date.now()) - mins * 60000;
+  const all = [].concat(...lists).filter(s => s.at && Date.parse(s.at) >= cut).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  for (const s of all) {
+    const k = s.title.toLowerCase().replace(/^breaking( news)?[:\s-]+/i, '').slice(0, 60);
+    if (seen.has(k)) continue; seen.add(k);
+    out.push(Object.assign({}, s, { title: s.title.replace(/^breaking( news)?[:\s-]+/i, '') }));
+    if (out.length >= max) break;
+  }
+  return out;
+}
+module.exports = { parseNews, parseTrends, pickBreaking };

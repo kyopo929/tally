@@ -15,4 +15,14 @@ t('cdata + fallback source', () => { assert.strictEqual(s[1].title, 'Markets ral
 t('max', () => assert.strictEqual(parseNews(xml, 1).length, 1));
 const { isOriginal } = require('../api/_cfg');
 t('original only', () => { assert.ok(isOriginal({ headers: { host: 'tally-ntqo.vercel.app' } })); assert.ok(!isOriginal({ headers: { host: 'friend-tally.vercel.app' } })); });
+const { parseTrends, pickBreaking } = require('../api/_news');
+const tx = `<rss xmlns:ht="x"><channel><item><title>lakers</title><ht:approx_traffic>500K+</ht:approx_traffic><link>https://trends.google.com/x</link>
+<ht:news_item><ht:news_item_title>Lakers beat Suns &amp; more</ht:news_item_title><ht:news_item_url>https://espn.com/a</ht:news_item_url><ht:news_item_source>ESPN</ht:news_item_source></ht:news_item>
+<ht:news_item><ht:news_item_title>Second</ht:news_item_title><ht:news_item_url>https://b.com</ht:news_item_url></ht:news_item></item>
+<item><title>no news</title></item></channel></rss>`;
+const tr = parseTrends(tx, 8);
+t('trends', () => { assert.strictEqual(tr.length, 1); assert.deepStrictEqual(tr[0], { term: 'lakers', title: 'Lakers beat Suns & more', source: 'ESPN', url: 'https://espn.com/a', traffic: '500K+' }); });
+const now = Date.parse('2026-11-25T04:00:00Z');
+const b = pickBreaking([[{ title: 'Old one', at: '2026-11-25T01:00:00Z' }, { title: 'Quake hits Japan', at: '2026-11-25T03:30:00Z' }], [{ title: 'BREAKING: Quake hits Japan', at: '2026-11-25T03:31:00Z' }, { title: 'Newest', at: '2026-11-25T03:50:00Z' }, { title: 'No date', at: null }]], 90, 6, now);
+t('breaking: recent, newest first, deduped, prefix dropped', () => assert.deepStrictEqual(b.map(x => x.title), ['Newest', 'Quake hits Japan']));
 console.log('news: ' + n + ' passed');
