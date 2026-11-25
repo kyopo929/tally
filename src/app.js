@@ -481,7 +481,7 @@
   function drawNews() { const b = $('#newsBox'); if (b) b.innerHTML = newsHtml(); else if (newsShown()) renderSide(); }
   async function refreshNews(force) {
     if (newsOff || newsBusy || !newsHost() || isPhone()) return;
-    if (!force && news && Date.now() - news.at < NEWS_EVERY) return;
+    if (!force && news && news.trending && Date.now() - news.at < NEWS_EVERY) return;
     newsBusy = true; if (news) drawNews();
     try {
       const r = await fetch('/api/news', { cache: 'no-store' });
