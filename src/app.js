@@ -4233,6 +4233,13 @@
     $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="pages"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openPages(); } }, true);
   }
 
+  // Typing a year into a date box: Chrome reports each digit as a whole date ("2" = year 0002), and saving that
+  // redraws the panel and throws away the rest of the year. Ignore dates before 1900 until the year is complete.
+  ['change', 'input'].forEach(type => document.addEventListener(type, e => {
+    const el = e.target;
+    if (el && el.type === 'date' && el.value && Number(el.value.slice(0, 4)) < 1900) e.stopImmediatePropagation();
+  }, true));
+
   /* ---------- boot ---------- */
   loadSyncMeta(); S = load(); persistLocal(); applyTheme(); applyTypeColors();
   ui.view = startView(); // Settings → Pages & swiping
