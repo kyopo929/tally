@@ -1138,6 +1138,9 @@ button.ol-dot.folded { box-shadow: none; }
 .nbul.l1 { background: transparent; border: 1.3px solid currentColor; width: 6px; height: 6px; }
 .nbul.l2 { border-radius: 1px; }
 .nbody-in { tab-size: 4; }
+.jsplit-h { order: 9; margin-left: auto; padding: 2px 8px; font-size: 11.5px; opacity: 0; transition: opacity .12s; }
+.jentry:hover .jsplit-h, .jsplit-h:focus-visible { opacity: 1; }
+@media (hover: none) { .jsplit-h { display: none; } }
 
 </style>
 </head>
@@ -5153,7 +5156,7 @@ button.ol-dot.folded { box-shadow: none; }
     }).join('') + '</div>';
   }
   const tools = (iso, opts) => '<div class="ol-tools">' + (isPhone() ? '<button type="button" class="chipbtn" data-olind="-1" aria-label="Move left a level">' + I.left + '</button><button type="button" class="chipbtn" data-olind="1" aria-label="Move right a level">' + I.right + '</button>' : '') + '<button type="button" class="chipbtn" data-oltask="1" title="Make this line a task (or type [ ] first)">' + I.check + 'Task</button><button type="button" class="chipbtn" data-ollink="1" title="Link a person or thing">' + I.link + 'Link</button>' +
-    (opts && opts.page ? '' : '<button type="button" class="chipbtn" data-jnew="' + iso + '" title="Start a separate entry">' + I.plus + 'New entry</button><button type="button" class="chipbtn" data-jmeet="' + iso + '" title="Start notes for a meeting">' + I.meet + 'Meeting</button>' + (opts && opts.split ? '<button type="button" class="chipbtn" data-jsplit="1" title="Make each top-level bullet its own entry">Split</button>' : '')) + '</div>';
+    (opts && opts.page ? '' : '<button type="button" class="chipbtn" data-jnew="' + iso + '" title="Start a separate entry">' + I.plus + 'New entry</button><button type="button" class="chipbtn" data-jmeet="' + iso + '" title="Start notes for a meeting">' + I.meet + 'Meeting</button>' + (opts && opts.split > 1 ? '<button type="button" class="chipbtn" data-jsplit="1" title="Each top-level bullet becomes its own entry (sub-bullets go with it)">Split into ' + opts.split + ' entries</button>' : '')) + '</div>';
   // A meeting entry starts with its name; the name opens the page with every meeting of that name
   const meetNames = () => [...new Set(S.tasks.filter(t => isMeet(t) && mName(t)).map(t => mName(t)))];
   const isMeetName = name => S.tasks.some(t => isMeet(t) && mName(t).toLowerCase() === (name || '').trim().toLowerCase());
@@ -5181,12 +5184,12 @@ button.ol-dot.folded { box-shadow: none; }
     const items = es.map(n => ({ id: n.id, n }));
     if (editing && (!items.length || ui.jNewFor === iso)) items.push({ id: 'new:' + iso, n: null });
     const links = [...new Set([].concat(...es.map(n => linksIn((n.meet || '') + '\n' + n.notes))))];
-    return '<div class="jentry' + (editing ? ' editing' : '') + '" data-jiso="' + iso + '"><div class="jhead"><button type="button" class="jdate" data-jedit="' + iso + '">' + D.WD_LONG[d.getDay()] + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</button>' + (iso === T ? '<span class="jtoday">Today</span>' : iso > T ? '<span class="jtoday jfuture">' + (D.diffDays(d, D.fromISO(T)) === 1 ? 'Tomorrow' : 'In ' + D.diffDays(d, D.fromISO(T)) + ' days') + '</span>' : '') + '</div>' +
+    return '<div class="jentry' + (editing ? ' editing' : '') + '" data-jiso="' + iso + '"><div class="jhead"><button type="button" class="jdate" data-jedit="' + iso + '">' + D.WD_LONG[d.getDay()] + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</button>' + (!editing && es.some(n => !isMeet(n) && parseOutline(n.notes).filter(l => l.lvl === 0 && l.text.trim()).length > 1) ? '<button type="button" class="chipbtn jsplit-h" data-jsplitday="' + iso + '" title="Each top-level bullet becomes its own entry">Split into entries</button>' : '') + (iso === T ? '<span class="jtoday">Today</span>' : iso > T ? '<span class="jtoday jfuture">' + (D.diffDays(d, D.fromISO(T)) === 1 ? 'Tomorrow' : 'In ' + D.diffDays(d, D.fromISO(T)) + ' days') + '</span>' : '') + '</div>' +
       items.map(({ id, n }, k) => '<div class="jitem' + (n && isMeet(n) ? ' ismeet' : '') + (k === items.length - 1 ? ' jlast' : '') + '" data-jid="' + id + '">' + meetHead(n, editing) +
         (editing ? '<button type="button" class="jcam" data-jphoto="' + id + '" title="Add a photo to this entry" aria-label="Add a photo to this entry">' + I.image + '</button>' + (n ? '<button type="button" class="jcam jdel" data-jdel="' + id + '" title="Delete this entry" aria-label="Delete this entry">' + I.trash + '</button>' : '') + olEditor(id, iso, n && n.notes ? parseOutline(n.notes) : [{ lvl: 0, text: '' }], n && isMeet(n) ? 'Notes, decisions, [ ] to-dos, [[people]]' : k === 0 && !es.length ? 'What happened? [ ] = task' : 'New entry')
           : (n.notes ? '<div class="jbody" data-jedit="' + iso + '">' + olView(n) + '</div>' : isMeet(n) ? '<div class="jbody hint" data-jedit="' + iso + '">No notes yet</div>' : '')) +
         (n ? attGrid(n) : '') + '</div>').join('') +
-      (editing ? tools(iso, { split: es.some(n => parseOutline(n.notes).filter(l => l.lvl === 0 && l.text.trim()).length > 1) }) : '') +
+      (editing ? tools(iso, { split: Math.max(0, ...es.map(n => isMeet(n) ? 0 : parseOutline(n.notes).filter(l => l.lvl === 0 && l.text.trim()).length)) }) : '') +
       (links.length && editing ? '<div class="jlinks">' + I.link + links.map(x => '<button type="button" class="jlink" data-jlink="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>' : '') + '</div>';
   }
   // Small month calendar for the Journal's side panel: dots on days with entries; any day (past or future) opens it
@@ -5604,6 +5607,7 @@ button.ol-dot.folded { box-shadow: none; }
       const jd = e.target.closest('[data-jdel]'); if (jd) { e.stopPropagation(); const n = taskById(jd.dataset.jdel); if (!n) return; snapshot(); unfocusOl(); trashTask(n); save(); render(); toast((isMeet(n) ? 'Meeting notes' : 'Entry') + ' moved to Recently deleted', true); return; }
       const jm = e.target.closest('[data-jmeet]'); if (jm) { e.stopPropagation(); unfocusOl(); const m = newEntry(jm.dataset.jmeet, { meet: '', title: '' }); save(); render(); focusMeet(m.id, true); return; }
       const jn = e.target.closest('[data-jnew]'); if (jn) { e.stopPropagation(); ui.jNewFor = jn.dataset.jnew; unfocusOl(); if (ui.view === 'calendar') renderDetail(); else renderMain(); focusJournal(true); return; }
+      const jsd = e.target.closest('[data-jsplitday]'); if (jsd) { e.stopPropagation(); let k = 0; entriesFor(jsd.dataset.jsplitday).filter(n => !isMeet(n)).forEach(n => { const r = splitEntry(n); if (r) k += r; }); render(); if (k) toast('Split into separate entries', true); return; }
       if (e.target.closest('[data-jsplit]')) {
         e.stopPropagation(); const ent = e.target.closest('.jentry'); const f = ui.olFocus;
         const es = entriesFor(ent.dataset.jiso); const target = (f && es.find(x => x.id === f.id)) || es.find(x => parseOutline(x.notes).filter(l => l.lvl === 0 && l.text.trim()).length > 1);
