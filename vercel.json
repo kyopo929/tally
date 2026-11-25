@@ -14,12 +14,5 @@
       "path": "/api/keepalive",
       "schedule": "17 4 * * *"
     }
-  ],
-  "functions": {
-    "api/prayer.js": {
-      "regions": [
-        "dxb1"
-      ]
-    }
-  }
+  ]
 }
