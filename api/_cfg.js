@@ -23,4 +23,4 @@ function supabaseFor(req) {
   if (isOriginal(req)) return ORIGINAL;
   return { url: '', key: '' };
 }
-module.exports = { supabaseFor, holidaysFor };
+module.exports = { supabaseFor, holidaysFor, isOriginal };

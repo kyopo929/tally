@@ -445,6 +445,37 @@
     return '';
   }
 
+  /* ---------- top stories (computer only, original site only) ---------- */
+  const NEWS_KEY = 'tally-news', NEWS_EVERY = 30 * 60000;
+  let news = (() => { try { return JSON.parse(localStorage.getItem(NEWS_KEY)) || null; } catch (e) { return null; } })();
+  let newsOff = false, newsBusy = false;
+  const newsHost = () => location.protocol === 'https:' && !/claude/.test(location.hostname);
+  function newsShown() { return !newsOff && newsHost() && !isPhone() && !!(news && news.stories && news.stories.length); }
+  function agoShort(iso) {
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (!iso || isNaN(m)) return '';
+    if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
+    const h = Math.round(m / 60); return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
+  }
+  function newsHtml() {
+    let h = '<div class="news-head"><span>Top stories</span><button type="button" class="news-ref' + (newsBusy ? ' busy' : '') + '" id="newsRefresh" title="Refresh' + (news && news.at ? ' (updated ' + agoShort(new Date(news.at).toISOString()) + ')' : '') + '" aria-label="Refresh top stories">↻</button></div><ol class="news-list">';
+    for (const s of news.stories) h += '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a><span class="news-meta">' + esc(s.source || '') + (s.source && s.at ? ' · ' : '') + (s.at ? agoShort(s.at) : '') + '</span></li>';
+    return h + '</ol>';
+  }
+  function drawNews() { const b = $('#newsBox'); if (b) b.innerHTML = newsHtml(); else if (newsShown()) renderSide(); }
+  async function refreshNews(force) {
+    if (newsOff || newsBusy || !newsHost() || isPhone()) return;
+    if (!force && news && Date.now() - news.at < NEWS_EVERY) return;
+    newsBusy = true; if (news) drawNews();
+    try {
+      const r = await fetch('/api/news', { cache: 'no-store' });
+      if (r.status === 404) { newsOff = true; news = null; try { localStorage.removeItem(NEWS_KEY); } catch (e) { } renderSide(); return; }
+      const j = r.ok ? await r.json() : null;
+      if (j && Array.isArray(j.stories) && j.stories.length) { news = { at: Date.now(), stories: j.stories }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
+    } catch (e) { }
+    newsBusy = false; if (news) drawNews();
+  }
+
   /* ---------- sidebar ---------- */
   function renderSide() {
     let h = '<nav class="nav">';
@@ -472,6 +503,7 @@
     h += '<div class="nav-sep"></div>' + (addingList ? '' : '<button type="button" class="nav-add" data-newlist="">' + I.plus + 'New list</button>') +
       '<button type="button" class="nav-item quiet" data-view="done" aria-current="' + (!ui.search && ui.view === 'done') + '"><span class="ico-all">' + I.done + '</span><span class="label">Completed</span></button>' +
       '<button type="button" class="nav-item quiet" data-view="trash" aria-current="' + (!ui.search && ui.view === 'trash') + '"><span class="ico-all">' + I.trash + '</span><span class="label">Recently deleted</span>' + (viewCount('trash') ? '<span class="count">' + viewCount('trash') + '</span>' : '') + '</button></nav>';
+    if (newsShown()) h = h.replace('<nav class="nav">', '<nav class="nav has-news">') + '<section class="news" id="newsBox" aria-label="Top stories">' + newsHtml() + '</section>';
     h += '<div class="side-foot"><div id="syncLine" class="syncline">' + syncLineHtml() + '</div><div class="row"><button type="button" class="chipbtn" id="settingsBtn" data-menu="settings:">Settings</button><button type="button" class="chipbtn" id="copyBackup">Copy backup</button></div></div>';
     $('#sideBody').innerHTML = h;
     updateBadge();
@@ -3721,6 +3753,10 @@
   bind(); if (isPhone()) $('#qa').placeholder = 'Add a task'; updatePreview(); render();
   const runReminders = () => loadPushed().then(checkReminders, checkReminders);
   runReminders(); setInterval(runReminders, 15000);
+  refreshNews(); setInterval(() => { refreshNews(); if ($('#newsBox')) drawNews(); }, 5 * 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNews(); });
+  document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#newsRefresh')) { e.preventDefault(); refreshNews(true); } });
+  if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', () => refreshNews());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) runReminders(); });
   // Opened from a notification: show that task
   const openTask = id => { if (!id || !taskById(id)) return; ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };

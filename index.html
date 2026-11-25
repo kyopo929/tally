@@ -89,6 +89,20 @@ svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; s
 .nav-input { width: 100%; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); outline: none; }
 .nav-add { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border-radius: 8px; color: var(--muted); }
 .nav-add:hover { background: var(--hover); color: var(--ink); }
+.nav.has-news { flex: 0 1 auto; }
+.news { flex: 1 1 0; min-height: 140px; overflow-y: auto; border-top: 1px solid var(--line); padding: 10px 14px 12px; }
+.news-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); position: sticky; top: -10px; background: var(--side, var(--surface)); }
+.news-ref { width: 24px; height: 24px; border-radius: 6px; color: var(--muted); font-size: 15px; line-height: 1; }
+.news-ref:hover { background: var(--hover); color: var(--ink); }
+.news-ref.busy { animation: newsspin 1s linear infinite; }
+@keyframes newsspin { to { transform: rotate(360deg); } }
+.news-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.news-list li { padding: 6px 4px; border-radius: 7px; }
+.news-list li:hover { background: var(--hover); }
+.news-list a { color: var(--ink); text-decoration: none; font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.news-list a:hover { text-decoration: underline; }
+.news-meta { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+@media (max-width: 600px) { .news { display: none; } }
 .side-foot { border-top: 1px solid var(--line); padding: 12px 16px 14px; font-size: 12px; color: var(--muted); display: grid; gap: 8px; }
 .side-foot .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .chipbtn { border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; font-size: 12px; color: var(--ink); background: var(--surface); }
@@ -1819,6 +1833,37 @@ button.ol-dot.folded { box-shadow: none; }
     return '';
   }
 
+  /* ---------- top stories (computer only, original site only) ---------- */
+  const NEWS_KEY = 'tally-news', NEWS_EVERY = 30 * 60000;
+  let news = (() => { try { return JSON.parse(localStorage.getItem(NEWS_KEY)) || null; } catch (e) { return null; } })();
+  let newsOff = false, newsBusy = false;
+  const newsHost = () => location.protocol === 'https:' && !/claude/.test(location.hostname);
+  function newsShown() { return !newsOff && newsHost() && !isPhone() && !!(news && news.stories && news.stories.length); }
+  function agoShort(iso) {
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (!iso || isNaN(m)) return '';
+    if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
+    const h = Math.round(m / 60); return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
+  }
+  function newsHtml() {
+    let h = '<div class="news-head"><span>Top stories</span><button type="button" class="news-ref' + (newsBusy ? ' busy' : '') + '" id="newsRefresh" title="Refresh' + (news && news.at ? ' (updated ' + agoShort(new Date(news.at).toISOString()) + ')' : '') + '" aria-label="Refresh top stories">↻</button></div><ol class="news-list">';
+    for (const s of news.stories) h += '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a><span class="news-meta">' + esc(s.source || '') + (s.source && s.at ? ' · ' : '') + (s.at ? agoShort(s.at) : '') + '</span></li>';
+    return h + '</ol>';
+  }
+  function drawNews() { const b = $('#newsBox'); if (b) b.innerHTML = newsHtml(); else if (newsShown()) renderSide(); }
+  async function refreshNews(force) {
+    if (newsOff || newsBusy || !newsHost() || isPhone()) return;
+    if (!force && news && Date.now() - news.at < NEWS_EVERY) return;
+    newsBusy = true; if (news) drawNews();
+    try {
+      const r = await fetch('/api/news', { cache: 'no-store' });
+      if (r.status === 404) { newsOff = true; news = null; try { localStorage.removeItem(NEWS_KEY); } catch (e) { } renderSide(); return; }
+      const j = r.ok ? await r.json() : null;
+      if (j && Array.isArray(j.stories) && j.stories.length) { news = { at: Date.now(), stories: j.stories }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
+    } catch (e) { }
+    newsBusy = false; if (news) drawNews();
+  }
+
   /* ---------- sidebar ---------- */
   function renderSide() {
     let h = '<nav class="nav">';
@@ -1846,6 +1891,7 @@ button.ol-dot.folded { box-shadow: none; }
     h += '<div class="nav-sep"></div>' + (addingList ? '' : '<button type="button" class="nav-add" data-newlist="">' + I.plus + 'New list</button>') +
       '<button type="button" class="nav-item quiet" data-view="done" aria-current="' + (!ui.search && ui.view === 'done') + '"><span class="ico-all">' + I.done + '</span><span class="label">Completed</span></button>' +
       '<button type="button" class="nav-item quiet" data-view="trash" aria-current="' + (!ui.search && ui.view === 'trash') + '"><span class="ico-all">' + I.trash + '</span><span class="label">Recently deleted</span>' + (viewCount('trash') ? '<span class="count">' + viewCount('trash') + '</span>' : '') + '</button></nav>';
+    if (newsShown()) h = h.replace('<nav class="nav">', '<nav class="nav has-news">') + '<section class="news" id="newsBox" aria-label="Top stories">' + newsHtml() + '</section>';
     h += '<div class="side-foot"><div id="syncLine" class="syncline">' + syncLineHtml() + '</div><div class="row"><button type="button" class="chipbtn" id="settingsBtn" data-menu="settings:">Settings</button><button type="button" class="chipbtn" id="copyBackup">Copy backup</button></div></div>';
     $('#sideBody').innerHTML = h;
     updateBadge();
@@ -5095,6 +5141,10 @@ button.ol-dot.folded { box-shadow: none; }
   bind(); if (isPhone()) $('#qa').placeholder = 'Add a task'; updatePreview(); render();
   const runReminders = () => loadPushed().then(checkReminders, checkReminders);
   runReminders(); setInterval(runReminders, 15000);
+  refreshNews(); setInterval(() => { refreshNews(); if ($('#newsBox')) drawNews(); }, 5 * 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNews(); });
+  document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#newsRefresh')) { e.preventDefault(); refreshNews(true); } });
+  if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', () => refreshNews());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) runReminders(); });
   // Opened from a notification: show that task
   const openTask = id => { if (!id || !taskById(id)) return; ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };
