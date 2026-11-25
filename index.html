@@ -4392,7 +4392,10 @@ button.ol-dot.folded { box-shadow: none; }
     return { date: future[0] || past[past.length - 1] || null, desc: describeDoc(atts.map(a => a.text || '').join('\n') + '\n' + (v.title || '') + '\n' + (v.body || '')) };
   }
   // Fills in expiry dates nobody set by hand; the renewal task and calendar follow from setExpiry
-  const isMe = name => !!name && (S.settings.meNames || []).some(x => x.toLowerCase() === name.trim().toLowerCase());
+  // Your own name isn't put in front of your documents ("Passport", not "Jino's passport"). Tally knows it from
+  // names you cleared from "Belongs to", and from the email you sync with (jino_kim@… → Jino).
+  const myNames = () => { const out = (S.settings.meNames || []).map(x => x.toLowerCase()); const em = sync && sync.user && sync.user.email; if (em) { const first = em.split('@')[0].split(/[._\-+0-9]+/).filter(x => x.length >= 2)[0]; if (first) out.push(first.toLowerCase()); } return out; };
+  const isMe = name => !!name && myNames().includes(name.trim().split(/\s+/)[0].toLowerCase());
   // ---- Notes: every photo or PDF (and the note's own text) is read on its own, so a note holding a passport,
   // a visa and an establishment card gets three "… expires" tasks, each named after its own document.
   // Entries live in note.expDocs: { k: file id or 'note', file, date, title, holder, taskId, taskFor, no }.
@@ -4407,7 +4410,9 @@ button.ol-dot.folded { box-shadow: none; }
     return future[0] || past[past.length - 1] || null;
   }
   function expDocName(note, e) {
-    const base = e.title || noteTitle(note), h = (e.holder || '').trim();
+    // one document in a note you titled: your title; several: what each one is (Visa, Emirates ID…)
+    const many = (note.expDocs || []).filter(x => !x.no).length > 1, own = E(note).title;
+    const base = (!many && own) ? own : (e.title || noteTitle(note)), h = (e.holder || '').trim();
     return h && !base.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + base : base;
   }
   function placeDocTask(note, e, dup) {
@@ -4422,7 +4427,7 @@ button.ol-dot.folded { box-shadow: none; }
     t.time = null; t.title = expDocName(note, e) + ' expires';
   }
   function scanNoteDocs(t) {
-    const list = t.expDocs || [], found = [], seen = new Set();
+    const list = t.expDocs || (t.expDocs = []), found = [], seen = new Set();
     for (const src of noteSources(t)) {
       const date = pickExpiry(expiryDatesIn(src.text, src.dayFirst)); if (!date) continue;
       const d = describeDoc(src.text); let hold = d.holder; if (isMe(hold)) hold = '';
@@ -4431,6 +4436,7 @@ button.ol-dot.folded { box-shadow: none; }
       if (!e) { e = { k: src.k, file: src.file, date, title: d.kind ? d.title : '', holder: hold }; list.push(e); found.push({ name: expDocName(t, e), date }); }
       else if (!e.no && (e.date !== date || (d.kind && e.title !== d.title) || (hold && e.holder !== hold))) { e.date = date; if (d.kind) e.title = d.title; if (hold) e.holder = hold; e.file = src.file; found.push({ name: expDocName(t, e), date }); }
     }
+    list.forEach(e => { if (e.holder && isMe(e.holder)) e.holder = ''; }); // your own name isn't shown
     // a file that was deleted or archived takes its task with it
     for (const e of list.slice()) if (!seen.has(e.k)) { const x = e.taskId && taskById(e.taskId); if (x && !x.done) trashTask(x); list.splice(list.indexOf(e), 1); }
     // From before: one expiry date for the whole note. Its task carries on as the matching document's task.
