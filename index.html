@@ -2522,7 +2522,7 @@ button.ol-dot.folded { box-shadow: none; }
         '<button type="button" class="cbar' + (x.sp.s < wsISO ? ' cl' : '') + (x.sp.e > weISO ? ' cr' : '') + '" ' + (x.sp.t.holiday ? 'data-dayopen="' + x.sp.s + '"' : 'data-open="' + x.sp.t.id + '" draggable="true" data-drag="' + x.sp.t.id + '" data-from="' + x.sp.s + '"') + ' style="grid-column:' + (x.c0 + 1) + ' / ' + (x.c1 + 2) + ';grid-row:' + (x.lane + 1) + ';--c:' + eventColor(x.sp.t) + '" title="' + esc(x.sp.t.title) + ': ' + esc(D.dueLabel(x.sp.s)) + ' to ' + esc(D.dueLabel(x.sp.e)) + (x.sp.t.holiday ? '' : '. Drag to move, drag the right edge to change the end date') + '">' + esc(x.sp.t.title) + '<span class="brange">' + esc(shortRange(x.sp.s, x.sp.e)) + '</span>' + (!x.sp.t.holiday && x.sp.e <= weISO ? '<span class="grip" draggable="true" data-resize="' + x.sp.t.id + '" title="Drag to change the end date"></span>' : '') + '</button>').join('') + '</div>';
       for (let i = 0; i < 7; i++) {
         const d = D.addDays(ws, i), iso = D.toISO(d);
-        const items = (byDay[iso] || []).sort((a, b) => ({ note: 0, expiry: 1, event: 1, task: 2, skip: 3 }[a.kind] - { note: 0, expiry: 1, event: 1, task: 2, skip: 3 }[b.kind]) || (a.t.time || '99').localeCompare(b.t.time || '99'));
+        const items = (byDay[iso] || []).sort(calOrder);
         h += '<div class="cal-day' + (d.getMonth() !== m ? ' out' : '') + (iso === T ? ' today' : '') + (ui.dayPanel === iso ? ' picked' : '') + (holDays.has(iso) ? ' hol' : '') + '" data-day="' + iso + '"><span class="dnum">' + d.getDate() + '</span><div class="cal-items">' +
           (hidden[i] ? '<span class="hint">+' + hidden[i] + ' more away</span>' : '') +
           items.map(({ t, kind, ghost }) => {
@@ -2564,7 +2564,7 @@ button.ol-dot.folded { box-shadow: none; }
         '<span class="pbar' + (x.sp.s < wsISO ? ' cl' : '') + (x.sp.e > weISO ? ' cr' : '') + '" style="grid-column:' + (x.c0 + 1) + ' / ' + (x.c1 + 2) + ';grid-row:' + (x.lane + 1) + ';--c:' + eventColor(x.sp.t) + '">' + esc(x.sp.t.title) + '</span>').join('') + '</div>';
       for (let c = 0; c < 7; c++) {
         const d = D.addDays(ws, c), iso = D.toISO(d);
-        const items = [].concat(...(byDay[iso] || []).filter(x => x.kind !== 'skip').map((x, k, all) => x.kind === 'note' ? (isMeet(x.t) ? (x.t.evId && all.some(z => z.kind === 'event' && z.t.id === x.t.evId) ? [] : [{ t: x.t, kind: 'note', line: (x.t.time ? D.fmtTime(x.t.time) + ' ' : '') + (mName(x.t) || 'Meeting'), meet: true }]) : noteLines(x.t).map(l => ({ t: x.t, kind: 'note', line: l }))) : [x])).sort((x, z) => ({ note: 0, expiry: 1, event: 1, task: 2 }[x.kind] - { note: 0, expiry: 1, event: 1, task: 2 }[z.kind]) || (x.t.time || '99').localeCompare(z.t.time || '99'));
+        const items = [].concat(...(byDay[iso] || []).filter(x => x.kind !== 'skip').map((x, k, all) => x.kind === 'note' ? (isMeet(x.t) ? (x.t.evId && all.some(z => z.kind === 'event' && z.t.id === x.t.evId) ? [] : [{ t: x.t, kind: 'note', line: (x.t.time ? D.fmtTime(x.t.time) + ' ' : '') + (mName(x.t) || 'Meeting'), meet: true }]) : noteLines(x.t).map(l => ({ t: x.t, kind: 'note', line: l }))) : [x])).sort(calOrder);
         const chip = ({ t, kind, ghost, line, meet }) => kind === 'note' ? '<span class="pch pnotec' + (meet ? ' pmeet' : '') + '">' + esc(line || 'Note') + '</span>'
           : kind === 'event' || kind === 'expiry' ? '<span class="pch pev" style="--c:' + (kind === 'expiry' ? '#b3261e' : eventColor(t)) + '">' + esc(kind === 'expiry' ? noteTitle(t) : t.title) + '</span>'
           : '<span class="pch ptask' + (t.done ? ' done' : '') + (ghost ? ' ghost' : '') + (!ghost && !t.done && iso < T ? ' over' : '') + '">' + esc(plainLinks(t.title)) + '</span>';
@@ -5341,6 +5341,19 @@ button.ol-dot.folded { box-shadow: none; }
   }
   function goJump(k) { const it = ui.jump && ui.jump.items[k]; closeJump(); if (it) it.go(); }
 
+  // What goes first in a calendar day (a full day hides from the bottom, so journal lines fold away first):
+  // holidays, birthdays/anniversaries, other events, tasks (timed, then untimed, done last), skipped, expiry dates,
+  // meeting notes, journal lines. Same rank: earlier time first.
+  function calRank(x) {
+    const t = x.t;
+    if (x.kind === 'event') return t.holiday ? 0 : isYearly(t) ? 1 : 2;
+    if (x.kind === 'task') return t.expFor ? 6 : t.done ? 4 : 3;
+    if (x.kind === 'skip') return 5;
+    if (x.kind === 'expiry') return 6;
+    if (x.kind === 'note') return x.meet || isMeet(t) ? 7 : 8;
+    return 9;
+  }
+  const calOrder = (a, b) => calRank(a) - calRank(b) || (a.t.time || '99').localeCompare(b.t.time || '99') || (a.t.createdAt || 0) - (b.t.createdAt || 0);
   // Month view: when a day has more than fits, show what fits plus "+N more" (opens the day)
   function fitCal() {
     if (isPhone()) return;
