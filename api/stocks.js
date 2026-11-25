@@ -1,7 +1,6 @@
 // GET /api/stocks?s=NVDA,SCHB → today's price and previous close for each symbol (Yahoo Finance).
-// The symbols come from the app (saved on each computer), not from this code. Original site only.
+// The symbols come from the app (saved on each computer), not from this code.
 'use strict';
-const { isOriginal } = require('./_cfg');
 
 async function quote(sym) {
   const r = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(sym) + '?range=1d&interval=1d', { headers: { 'User-Agent': 'Mozilla/5.0 (Tally)' } });
@@ -18,7 +17,6 @@ function marketState(q) {
 }
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  if (!isOriginal(req)) { res.statusCode = 404; return res.end(JSON.stringify({ error: 'Not available' })); }
   const syms = [...new Set(String(new URL(req.url, 'http://x').searchParams.get('s') || '').toUpperCase().split(',').filter(x => /^[A-Z0-9.^=-]{1,12}$/.test(x)))].slice(0, 12);
   const got = await Promise.allSettled(syms.map(quote));
   const quotes = {};

@@ -4,9 +4,7 @@
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
 // outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
 // except big moments: a major championship won or a famous person's death (`big`).
-// Only the original site serves it; copies of Tally get 404 and the sidebar box stays hidden.
 'use strict';
-const { isOriginal } = require('./_cfg');
 const { parseNews, soft, key, notIn, sameStory } = require('./_news');
 const G = 'hl=en-US&gl=US&ceid=US:en';
 const TOP = 'https://news.google.com/rss?' + G;
@@ -22,7 +20,6 @@ async function get(url) {
 }
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  if (!isOriginal(req)) { res.statusCode = 404; return res.end(JSON.stringify({ error: 'Not available' })); }
   const [top, sports, ent, dxb] = await Promise.allSettled([TOP, section('SPORTS'), section('ENTERTAINMENT'), DUBAI].map(get));
   const list = (r, n) => r.status === 'fulfilled' ? parseNews(r.value, n || 40) : [];
   const softList = list(sports, 80).concat(list(ent, 80)).map(s => s.title);

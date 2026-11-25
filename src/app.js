@@ -317,7 +317,7 @@
       if (!isEvent(t) || !t.recur || !t.due) return;
       const L = spanLen(t); let d = t.due, n = 0;
       while (D.toISO(D.addDays(D.fromISO(d), L)) < T && n++ < 800) d = D.nextOccurrence(d, t.recur);
-      if (d !== t.due) { t.due = d; if (L) t.end = D.toISO(D.addDays(D.fromISO(d), L)); t.remindedFor = null; changed = true; }
+      if (d !== t.due) { const was = t.due; t.due = d; rebaseReminder(t, was, t.time); if (L) t.end = D.toISO(D.addDays(D.fromISO(d), L)); t.remindedFor = null; changed = true; }
     });
     if (changed) save();
   }
@@ -382,13 +382,11 @@
     if (!t.recur) { t.done = true; t.doneAt = Date.now(); return null; }
     t.completions = (t.completions || []).concat([{ at: Date.now(), due: t.due }]).slice(-60);
     const next = D.nextOccurrence(t.due, t.recur);
-    if (t.reminder && t.due) {
-      const oldBase = D.parseLocalDT(t.due + 'T' + (t.time || '00:00'));
-      const offset = D.parseLocalDT(t.reminder) - oldBase;
-      t.reminder = D.toLocalDT(new Date(D.parseLocalDT(next + 'T' + (t.time || '00:00')).getTime() + offset));
-    } else t.reminder = null;
+    const was = t.due;
+    t.due = next;
+    if (t.reminder && was) rebaseReminder(t, was, t.time); else t.reminder = null;
     t.remindedFor = null;
-    t.due = next; t.myDay = null; t.steps.forEach(x => x.done = false);
+    t.myDay = null; t.steps.forEach(x => x.done = false);
     if (t.start && t.start > next) t.start = null;
     return next;
   }
@@ -457,17 +455,18 @@
     const c = lsGet(SIDE_KEY, {}), def = SIDE_DEFS.map(d => d[0]);
     const order = (c.order || []).filter(v => def.includes(v)); def.forEach(v => { if (!order.includes(v)) order.push(v); });
     let syms = c.syms; if (!syms) { try { syms = (localStorage.getItem('tally-stock-symbols') || '').split(',').filter(Boolean); } catch (e) { syms = []; } } // from the first version
-    return { order, off: new Set(c.off || ['prayer']), syms, unit: c.unit === 'F' ? 'F' : 'C',
+    const existing = c.off || (localStorage.getItem(NEWS_KEY) || localStorage.getItem('tally-stock-symbols') ? ['prayer'] : def); // new: all off
+    return { order, off: new Set(existing), syms, unit: c.unit === 'F' ? 'F' : 'C',
       wx: c.wx || { name: 'Dubai', label: 'Dubai, United Arab Emirates', lat: 25.2048, lon: 55.2708 },
       clocks: c.clocks || [{ name: 'Los Angeles', tz: 'America/Los_Angeles' }, { name: 'Dubai', tz: 'Asia/Dubai' }, { name: 'Seoul', tz: 'Asia/Seoul' }],
       nTop: c.nTop || 5, nDubai: c.nDubai || 3, prayers: c.prayers || ['asr', 'maghrib', 'isha'] };
   }
   function setSide(c) { lsSet(SIDE_KEY, { order: c.order, off: [...c.off], syms: c.syms, unit: c.unit, wx: c.wx, clocks: c.clocks, nTop: c.nTop, nDubai: c.nDubai, prayers: c.prayers }); }
   let news = lsGet(NEWS_KEY, null);
-  let newsOff = false, newsBusy = false;
+  let newsBusy = false;
   const newsHost = () => location.protocol === 'https:' && !/claude/.test(location.hostname);
   const sideOn = () => { const c = sideCfg(); return c.order.filter(v => !c.off.has(v)); };
-  function newsShown() { return !newsOff && newsHost() && !isPhone() && !!news && sideOn().length > 0; }
+  function newsShown() { return newsHost() && !isPhone() && !!news && sideOn().length > 0; }
   function agoShort(iso) {
     const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
     if (!iso || isNaN(m)) return '';
@@ -622,19 +621,21 @@
   }
   function drawNews() { const b = $('#newsBox'); if (b) { if (newsShown()) b.innerHTML = newsHtml(); else renderSide(); } else if (newsShown()) renderSide(); }
   async function refreshNews(force) {
-    if (newsOff || newsBusy || !newsHost() || isPhone()) return;
-    const on0 = sideOn(), c0 = sideCfg(), missing = news && ((on0.includes('weather') && (!news.wx || news.wx.for !== c0.wx.label)) || (on0.includes('prayer') && !(news.prayer && news.prayer.days && Object.values(news.prayer.days)[0] && Object.values(news.prayer.days)[0].fajr)));
-    if (!force && !missing && news && news.v === 6 && Date.now() - news.at < NEWS_EVERY) return;
+    if (newsBusy || !newsHost() || isPhone()) return;
+    const on = sideOn(), c0 = sideCfg(); if (!on.length) return;
+    const fresh = news && news.v === 6 && Date.now() - news.at < NEWS_EVERY;
+    const missing = !news || (on.includes('weather') && (!news.wx || news.wx.for !== c0.wx.label)) || (on.includes('prayer') && !(news.prayer && news.prayer.days && Object.values(news.prayer.days)[0] && Object.values(news.prayer.days)[0].fajr)) || ((on.includes('news') || on.includes('dubai')) && !(news.stories || []).length);
+    if (!force && !missing && fresh) return;
     newsBusy = true; if (news) drawNews();
+    const old = news || {};
+    news = { v: 6, at: Date.now(), stories: old.stories || [], dubai: old.dubai || [], quotes: old.quotes || {}, wx: old.wx, prayer: old.prayer };
     try {
-      const r = await fetch('/api/news', { cache: 'no-store' });
-      if (r.status === 404) { newsOff = true; news = null; try { localStorage.removeItem(NEWS_KEY); } catch (e) { } renderSide(); return; }
-      const j = r.ok ? await r.json() : null;
-      const old = news || {};
-      if (j && (j.stories || []).length) news = { v: 6, at: Date.now(), stories: j.stories, dubai: j.dubai || [], quotes: old.quotes || {}, wx: old.wx, prayer: old.prayer };
-      if (news) { const on = sideOn(); await Promise.all([on.includes('weather') && refreshWeather(), on.includes('stocks') && refreshStocks(), on.includes('prayer') && refreshPrayer()]); lsSet(NEWS_KEY, news); }
+      await Promise.all([
+        (on.includes('news') || on.includes('dubai')) && fetch('/api/news', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => { if (j && (j.stories || []).length) { news.stories = j.stories; news.dubai = j.dubai || []; } }).catch(() => { }),
+        on.includes('weather') && refreshWeather(), on.includes('stocks') && refreshStocks(), on.includes('prayer') && refreshPrayer()]);
+      lsSet(NEWS_KEY, news);
     } catch (e) { } finally { newsBusy = false; }
-    if (news) drawNews();
+    drawNews();
   }
 
   // Settings → Sidebar boxes
@@ -644,7 +645,7 @@
     const num = (id, val, max) => '<select class="ctl sbnum" id="' + id + '">' + Array.from({ length: max }, (_, k) => '<option' + (k + 1 === val ? ' selected' : '') + '>' + (k + 1) + '</option>').join('') + '</select>';
     const clocks = c.clocks.slice().sort((a, b) => tzOffset(a.tz) - tzOffset(b.tz));
     return '<div class="sheet narrow sbsheet" role="dialog" aria-modal="true" aria-labelledby="sbTitle"><div class="sheet-head"><h2 id="sbTitle">Sidebar boxes</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
-      '<div class="field"><span class="field-label">Show and order</span><p class="hint" style="margin:0 0 6px">Shown under Recently deleted on this computer. Untick a box to hide it.</p><div class="pglist">' +
+      '<div class="field"><span class="field-label">Show and order</span><p class="hint" style="margin:0 0 6px">Shown under Recently deleted on this computer. Tick a box to show it.</p><div class="pglist">' +
       c.order.map((v, k) => '<div class="pgrow' + (c.off.has(v) ? ' off' : '') + '"><label class="chk"><input type="checkbox" data-sbon="' + v + '"' + (c.off.has(v) ? '' : ' checked') + '> ' + esc(SIDE_NAME[v]) + '</label><span class="spacer"></span>' + arrows('sbmove', k, c.order.length, SIDE_NAME[v]) + '</div>').join('') + '</div></div>' +
       '<div class="field"><span class="field-label">Weather city</span><div class="pglist"><div class="pgrow"><b>' + esc(c.wx.label) + '</b></div></div>' + cityBox('wx', 'Change city: start typing, e.g. London') +
       '<div class="seg" role="group" aria-label="Temperature" style="margin-top:8px">' + [['C', '°C'], ['F', '°F']].map(([k, n]) => '<button type="button" data-sbunit="' + k + '" aria-pressed="' + (c.unit === k) + '">' + n + '</button>').join('') + '</div></div>' +
@@ -1222,31 +1223,42 @@
     const found = ((t.title || '') + ' ' + (t.notes || '')).match(/\b(?:https?:\/\/|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]]/gi) || [];
     return [...new Set(found)].slice(0, 8).map(u => { const href = /^https?:/i.test(u) ? u : 'https://' + u; let host = u; try { host = new URL(href).hostname.replace(/^www\./, ''); } catch (e) { } return '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(href) + '">' + I.link + esc(host) + '</a>'; }).join('');
   }
+  // Reminder presets are kept as a rule (t.remRule) so a repeating task's next one, or a moved date, gets the same reminder.
+  const REM_PRESETS = [['due', 'At due time', 1], ['15m', '15 min before', 1], ['1h', '1 hour before', 1], ['morning', 'Morning of, 6am', 0], ['1w', '1 week before', 0], ['1mo', '1 month before', 0]];
   function reminderField(t) {
-    const now = new Date();
-    const presets = [];
-    if (t.due && t.time) { presets.push(['due', 'At due time'], ['15m', '15 min before'], ['1h', '1 hour before']); }
-    if (t.due) presets.push(['morning', 'Morning of, 6am'], ['daybefore', 'Day before, 6pm']);
-    presets.push(['in1h', 'In 1 hour'], ['tom9', 'Tomorrow 6am']);
+    const presets = t.due ? REM_PRESETS.filter(p => !p[2] || t.time) : [];
     const auto = !t.reminder && S.settings.autoRemind && t.due && t.time;
     const bdayAuto = !t.reminder && isEvent(t) && isYearly(t) && S.settings.bdayRemind !== false;
-    return '<div class="field"><label for="dRem">Remind me</label><input type="datetime-local" class="ctl" id="dRem" value="' + (t.reminder || '') + '">' +
-      '<div class="presets">' + presets.map(([k, n]) => '<button type="button" class="chipbtn" data-rem="' + k + '">' + n + '</button>').join('') +
+    const rd = t.reminder ? t.reminder.slice(0, 10) : '', rt = t.reminder ? t.reminder.slice(11, 16) : '';
+    return '<div class="field"><label for="dRemD">Remind me</label><div class="remrow"><input type="date" class="ctl" id="dRemD" value="' + rd + '" aria-label="Reminder date"><input type="time" class="ctl" id="dRemT" value="' + rt + '" aria-label="Reminder time"></div>' +
+      '<div class="presets">' + presets.map(([k, n]) => '<button type="button" class="chipbtn' + (t.reminder && t.remRule === k ? ' on' : '') + '" data-rem="' + k + '">' + n + '</button>').join('') +
       (t.reminder ? '<button type="button" class="chipbtn" data-rem="clear">No reminder</button>' : '') + '</div>' +
+      (t.reminder && t.recur && t.due ? '<span class="hint">Each next one gets the same reminder' + (t.remRule ? ' (' + esc((REM_PRESETS.find(p => p[0] === t.remRule) || [])[1] || '').toLowerCase() + ')' : '') + '.</span>' : '') +
       (bdayAuto ? '<span class="hint">Automatic reminder the day before at 6am. Change this under Settings.</span>' : auto ? '<span class="hint">Automatic reminder at the due time (' + esc(D.fmtTime(t.time)) + '). Change this under Settings.</span>' : '') + '</div>';
   }
+  function ruleReminder(t, k) {
+    if (!t.due) return null;
+    const at = (iso, hm) => D.parseLocalDT(iso + 'T' + hm), base = t.time || '06:00';
+    if (k === 'due') return t.time ? at(t.due, t.time) : null;
+    if (k === '15m') return t.time ? new Date(at(t.due, t.time) - 15 * 60000) : null;
+    if (k === '1h') return t.time ? new Date(at(t.due, t.time) - 60 * 60000) : null;
+    if (k === 'morning') return at(t.due, '06:00');
+    if (k === '1w') return at(D.toISO(D.addDays(D.fromISO(t.due), -7)), base);
+    if (k === '1mo') { const d = D.fromISO(t.due), m = new Date(d.getFullYear(), d.getMonth() - 1, 1); m.setDate(Math.min(d.getDate(), new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate())); return at(D.toISO(m), base); }
+    return null;
+  }
   function presetReminder(t, k) {
-    const now = new Date();
-    const at = (iso, hm) => D.parseLocalDT(iso + 'T' + hm);
-    let d = null;
-    if (k === 'due') d = at(t.due, t.time);
-    if (k === '15m') d = new Date(at(t.due, t.time) - 15 * 60000);
-    if (k === '1h') d = new Date(at(t.due, t.time) - 60 * 60000);
-    if (k === 'morning') d = at(t.due, '06:00');
-    if (k === 'daybefore') d = at(D.toISO(D.addDays(D.fromISO(t.due), -1)), '18:00');
-    if (k === 'in1h') { d = new Date(now.getTime() + 3600000); d.setSeconds(0, 0); }
-    if (k === 'tom9') d = at(D.toISO(D.addDays(now, 1)), '06:00');
-    t.reminder = d ? D.toLocalDT(d) : null; t.remindedFor = null;
+    const d = ruleReminder(t, k);
+    t.reminder = d ? D.toLocalDT(d) : null; t.remRule = d ? k : null; t.remindedFor = null;
+  }
+  // The due date (or time) changed: keep the reminder the same distance before it.
+  function rebaseReminder(t, oldDue, oldTime) {
+    if (!t.reminder) return;
+    if (!t.due) { t.reminder = null; t.remRule = null; return; }
+    if (t.remRule) { const d = ruleReminder(t, t.remRule); if (d) { t.reminder = D.toLocalDT(d); t.remindedFor = null; return; } }
+    if (!oldDue) return;
+    const offset = D.parseLocalDT(t.reminder) - D.parseLocalDT(oldDue + 'T' + (oldTime || t.time || '00:00'));
+    t.reminder = D.toLocalDT(new Date(D.parseLocalDT(t.due + 'T' + (t.time || '00:00')).getTime() + offset)); t.remindedFor = null;
   }
 
   /* ---------- reminders engine ---------- */
@@ -1411,7 +1423,7 @@
         '<button type="button" data-mact="notif">' + I.bell + esc(notifStatus()) + '</button>' +
         '<div class="mlabel">Your data</div>' + (syncAvailable() ? (sync.user ? '<button type="button" data-mact="signout">' + I.x + 'Sign out of sync (' + esc(sync.user.email || '') + ')</button>' : '<button type="button" data-mact="signin">' + I.repeat + 'Turn on sync\u2026</button>') : '') +
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
-        (news && newsHost() && !newsOff ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
+        (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
     } else if (type === 'task') {
       const t = taskById(id); if (!t) { ui.menu = null; el.hidden = true; return; }
       const md = t.myDay === todayISO();
@@ -1726,7 +1738,7 @@
       const ta = e.target.closest('[data-tact]');
       if (ta && type === 'task') {
         const t = taskById(id); const k = ta.dataset.tact; snapshot();
-        if (['today', 'tomorrow', 'nextweek', 'weekend'].includes(k)) { t.due = quickDate(k); toast('Due ' + D.dueLabel(t.due), true); }
+        if (['today', 'tomorrow', 'nextweek', 'weekend'].includes(k)) { const wd = t.due; t.due = quickDate(k); rebaseReminder(t, wd, t.time); toast('Due ' + D.dueLabel(t.due), true); }
         if (k === 'nodate') { t.due = null; t.time = null; t.recur = null; toast('Due date removed', true); }
         if (k === 'myday') t.myDay = t.myDay === todayISO() ? null : todayISO();
         if (k === 'totask') { delete t.type; toast('Now a task', true); }
@@ -1853,7 +1865,7 @@
       }
       const delta = D.diffDays(D.fromISO(iso), D.fromISO(cd.from || t.due)); if (!delta) { render(); return; }
       const L = spanLen(t);
-      t.due = D.toISO(D.addDays(D.fromISO(t.due), delta));
+      const wasDue = t.due; t.due = D.toISO(D.addDays(D.fromISO(t.due), delta)); rebaseReminder(t, wasDue, t.time);
       if (L) t.end = D.toISO(D.addDays(D.fromISO(t.due), L));
       if (t.recur && (t.recur.freq === 'month' || t.recur.freq === 'year')) { const nd = D.fromISO(t.due).getDate(); t.recur = Object.assign({}, t.recur, { anchorDay: nd }); if (t.recur.monthDay) t.recur.monthDay = nd; }
       if (t.recur && t.recur.byDay) { const r = Object.assign({}, t.recur); delete r.byDay; t.recur = r; }
@@ -1937,8 +1949,8 @@
         return;
       }
       const sd = e.target.closest('[data-sdate]'); if (sd) { t.start = sd.dataset.sdate === 'clear' ? null : quickDate(sd.dataset.sdate); save(); render(); return; }
-      const qd = e.target.closest('[data-qdate]'); if (qd) { t.due = quickDate(qd.dataset.qdate); save(); render(); return; }
-      const rb = e.target.closest('[data-rem]'); if (rb) { if (rb.dataset.rem === 'clear') { t.reminder = null; t.remindedFor = null; } else presetReminder(t, rb.dataset.rem); save(); render(); return; }
+      const qd = e.target.closest('[data-qdate]'); if (qd) { const wd = t.due; t.due = quickDate(qd.dataset.qdate); rebaseReminder(t, wd, t.time); save(); render(); return; }
+      const rb = e.target.closest('[data-rem]'); if (rb) { if (rb.dataset.rem === 'clear') { t.reminder = null; t.remRule = null; t.remindedFor = null; } else presetReminder(t, rb.dataset.rem); save(); render(); return; }
       const st = e.target.closest('[data-sact]');
       if (st) {
         const sid = st.closest('[data-step]').dataset.step;
@@ -1974,14 +1986,15 @@
       if (e.target.id === 'dDue' && isEvent(t) && !e.target.value) { e.target.value = t.due; return; }
       if (e.target.id === 'dSince') { const y = parseInt(e.target.value, 10); if (y >= 1900 && y <= new Date().getFullYear()) t.since = y; else delete t.since; save(); render(); }
       if (e.target.id === 'dEnd') { const v = e.target.value; if (v && v > t.due) { t.end = v; t.time = null; } else delete t.end; save(); render(); overlapToast(t); }
-      if (e.target.id === 'dDue') { const L = spanLen(t); t.due = e.target.value || null; if (!t.due) { t.time = null; t.recur = null; delete t.end; } else if (L) t.end = D.toISO(D.addDays(D.fromISO(t.due), L)); save(); render(); }
+      if (e.target.id === 'dDue') { const L = spanLen(t), wd = t.due; t.due = e.target.value || null; rebaseReminder(t, wd, t.time); if (!t.due) { t.time = null; t.recur = null; delete t.end; } else if (L) t.end = D.toISO(D.addDays(D.fromISO(t.due), L)); save(); render(); }
       if (e.target.id === 'dEvery' && t.recur) {
         const n = Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1));
         if (n !== (t.recur.interval || 1)) { const due = t.due ? D.fromISO(t.due) : new Date(); t.recur = { freq: t.recur.freq, interval: n, anchorDay: (t.recur.monthDay || due.getDate()) }; }
         save(); render();
       }
-      if (e.target.id === 'dTime') { t.time = e.target.value || null; save(); render(); }
-      if (e.target.id === 'dRem') { t.reminder = e.target.value || null; t.remindedFor = null; save(); render(); }
+      if (e.target.id === 'dTime') { const wt = t.time; t.time = e.target.value || null; if (t.remRule && ['due', '15m', '1h'].includes(t.remRule) && !t.time) { t.remRule = null; } else rebaseReminder(t, t.due, wt); save(); render(); }
+      if (e.target.id === 'dRemD') { const v = e.target.value; t.reminder = v ? v + 'T' + (t.reminder ? t.reminder.slice(11, 16) : '06:00') : null; t.remRule = null; t.remindedFor = null; save(); render(); }
+      if (e.target.id === 'dRemT') { const v = e.target.value || '06:00'; t.reminder = (t.reminder ? t.reminder.slice(0, 10) : (t.due || todayISO())) + 'T' + v; t.remRule = null; t.remindedFor = null; save(); render(); }
       if (e.target.id === 'dList') { t.listId = e.target.value; t.sectionId = null; save(); render(); }
       if (e.target.id === 'dSection') { t.sectionId = e.target.value || null; save(); render(); }
       if (e.target.id === 'dStart') { t.start = e.target.value || null; save(); render(); }

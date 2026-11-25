@@ -1071,3 +1071,6 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
 button.ol-dot::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
 button.ol-dot.folded { box-shadow: none; }
 .ol-line[style*="--lvl:1"] button.ol-dot.folded, .ol-line[style*="--lvl:3"] button.ol-dot.folded { background: var(--accent); }
+
+.remrow { display: grid; grid-template-columns: 1fr 120px; gap: 6px; }
+.presets .chipbtn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
