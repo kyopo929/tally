@@ -3587,7 +3587,7 @@
     const items = es.map(n => ({ id: n.id, n }));
     if (editing && (!items.length || ui.jNewFor === iso)) items.push({ id: 'new:' + iso, n: null });
     const links = [...new Set([].concat(...es.map(n => linksIn((n.meet || '') + '\n' + n.notes))))];
-    return '<div class="jentry' + (editing ? ' editing' : '') + '" data-jiso="' + iso + '"><div class="jhead"><button type="button" class="jdate" data-jedit="' + iso + '">' + D.WD_LONG[d.getDay()] + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</button>' + (iso === T ? '<span class="jtoday">Today</span>' : '') + '</div>' +
+    return '<div class="jentry' + (editing ? ' editing' : '') + '" data-jiso="' + iso + '"><div class="jhead"><button type="button" class="jdate" data-jedit="' + iso + '">' + D.WD_LONG[d.getDay()] + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</button>' + (iso === T ? '<span class="jtoday">Today</span>' : iso > T ? '<span class="jtoday jfuture">' + (D.diffDays(d, D.fromISO(T)) === 1 ? 'Tomorrow' : 'In ' + D.diffDays(d, D.fromISO(T)) + ' days') + '</span>' : '') + '</div>' +
       items.map(({ id, n }, k) => '<div class="jitem' + (n && isMeet(n) ? ' ismeet' : '') + (k === items.length - 1 ? ' jlast' : '') + '" data-jid="' + id + '">' + meetHead(n, editing) +
         (editing ? '<button type="button" class="jcam" data-jphoto="' + id + '" title="Add a photo to this entry" aria-label="Add a photo to this entry">' + I.image + '</button>' + (n ? '<button type="button" class="jcam jdel" data-jdel="' + id + '" title="Delete this entry" aria-label="Delete this entry">' + I.trash + '</button>' : '') + olEditor(id, iso, n && n.notes ? parseOutline(n.notes) : [{ lvl: 0, text: '' }], n && isMeet(n) ? 'Notes, decisions, [ ] to-dos, [[people]]' : k === 0 && !es.length ? 'What happened? Enter = new line, Tab = indent, [ ] = task' : 'New entry')
           : (n.notes ? '<div class="jbody" data-jedit="' + iso + '">' + olView(n) + '</div>' : isMeet(n) ? '<div class="jbody hint" data-jedit="' + iso + '">No notes yet</div>' : '')) +
@@ -3595,16 +3595,35 @@
       (editing ? tools(iso, { split: es.some(n => parseOutline(n.notes).filter(l => l.lvl === 0 && l.text.trim()).length > 1) }) : '') +
       (links.length && editing ? '<div class="jlinks">' + I.link + links.map(x => '<button type="button" class="jlink" data-jlink="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>' : '') + '</div>';
   }
+  // Small month calendar for the Journal's side panel: dots on days with entries; any day (past or future) opens it
+  function jMiniCal(ed) {
+    const T = todayISO(), base = ui.jMonth || D.fromISO(ed), y = base.getFullYear(), m = base.getMonth();
+    const has = new Set(S.tasks.filter(isNote).map(t => t.due));
+    const WS = S.settings.weekStart === 1 ? 1 : 0, first = new Date(y, m, 1), lead = (first.getDay() - WS + 7) % 7, n = new Date(y, m + 1, 0).getDate();
+    let h = '<div class="jcal"><div class="jcal-head"><button type="button" class="iconbtn" data-jmonth="-1" aria-label="Previous month">' + I.left + '</button><b>' + D.MON_SHORT[m] + ' ' + y + '</b><button type="button" class="iconbtn" data-jmonth="1" aria-label="Next month">' + I.right + '</button></div><div class="jcal-grid">';
+    for (let k = 0; k < 7; k++) h += '<span class="jcal-wd">' + 'SMTWTFS'[(k + WS) % 7] + '</span>';
+    for (let k = 0; k < lead; k++) h += '<span></span>';
+    for (let dd = 1; dd <= n; dd++) {
+      const iso = D.toISO(new Date(y, m, dd));
+      h += '<button type="button" class="jcal-d' + (iso === T ? ' today' : '') + (iso === ed ? ' sel' : '') + (has.has(iso) ? ' has' : '') + (iso > T ? ' fut' : '') + '" data-jopen="' + iso + '" title="' + esc(D.dueLabel(iso)) + '">' + dd + '</button>';
+    }
+    return h + '</div></div>';
+  }
   function renderJournal() {
-    const T = todayISO(), ed = ui.jEdit || T;
+    const T = todayISO(), ed = ui.jEdit || T, tmr = D.toISO(D.addDays(D.fromISO(T), 1));
     const notes = S.tasks.filter(isNote);
     let days = [...new Set([T, ed].concat(notes.map(t => t.due)))].sort().reverse();
     const lim = ui.jLimit || 30, more = days.length > lim;
     if (more) days = days.slice(0, lim).concat(days.slice(lim).includes(ed) ? [ed] : []);
-    const nDays = new Set(notes.map(t => t.due)).size;
-    const html = '<datalist id="meetNames">' + meetNames().map(x => '<option value="' + esc(x) + '">').join('') + '</datalist><div class="jtop"><span class="hint jkeys">Ctrl+O jumps to anything</span><label class="hint" for="jDate">Go to a day</label><input type="date" class="ctl" id="jDate" value="' + ed + '"></div>' +
-      days.map(iso => jEntry(iso, iso === ed)).join('') + (more ? '<button type="button" class="chipbtn jmore" data-jmore="1">Show earlier days</button>' : '');
-    return { title: 'Journal', sub: nDays + ' day' + (nDays === 1 ? '' : 's'), html, actions: '' };
+    const ahead = [...new Set(notes.filter(t => t.due > T).map(t => t.due))].sort();
+    const firstLine = iso => { const n = entriesFor(iso)[0]; if (!n) return ''; if (isMeet(n)) return mName(n) || 'Meeting'; const l = parseOutline(n.notes).find(x => x.text.trim()); return l ? plainLinks(l.text).replace(/^\[[ x]\]\s*/, '') : ''; };
+    const side = '<aside class="jside">' + jMiniCal(ed) +
+      '<button type="button" class="chipbtn jplan" data-jopen="' + tmr + '">' + I.plus + 'Plan tomorrow</button>' +
+      '<div class="jside-head">Coming up</div>' + (ahead.length ? '<div class="jahead">' + ahead.map(iso => { const d = D.fromISO(iso); return '<button type="button" class="jahead-row" data-jopen="' + iso + '"><b>' + D.WD_LONG[d.getDay()].slice(0, 3) + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + '</b><span>' + esc(firstLine(iso)) + '</span></button>'; }).join('') + '</div>' : '<p class="hint jside-none">Nothing planned yet. Pick a day above, or Plan tomorrow, and write in it the same way.</p>') +
+      '<p class="hint jside-none">Ctrl+O jumps to anything.</p></aside>';
+    const html = '<datalist id="meetNames">' + meetNames().map(x => '<option value="' + esc(x) + '">').join('') + '</datalist><div class="jlayout"><div class="jmain"><div class="jtop"><button type="button" class="chipbtn jtmr" data-jopen="' + tmr + '">' + I.plus + 'Tomorrow</button><label class="hint" for="jDate">Go to a day</label><input type="date" class="ctl" id="jDate" value="' + ed + '"></div>' +
+      days.map(iso => jEntry(iso, iso === ed)).join('') + (more ? '<button type="button" class="chipbtn jmore" data-jmore="1">Show earlier days</button>' : '') + '</div>' + side + '</div>';
+    return { title: 'Journal', sub: '', html, actions: '' };
   }
   // A page for a person or thing: standing facts on top, then every mention (Obsidian-style backlinks)
   function renderLinkPage(name) {
@@ -3941,7 +3960,8 @@
       }
       const jl = e.target.closest('[data-jlink]'); if (jl) { e.stopPropagation(); openLink(jl.dataset.jlink); return; }
       if (e.target.closest('[data-jback]')) { setView('journal'); return; }
-      const jo = e.target.closest('[data-jopen]'); if (jo) { e.stopPropagation(); ui.jEdit = jo.dataset.jopen; ui.selected = null; ui.dayPanel = null; setView('journal'); focusJournal(); return; }
+      const jmo = e.target.closest('[data-jmonth]'); if (jmo) { e.stopPropagation(); const b = ui.jMonth || D.fromISO(ui.jEdit || todayISO()); ui.jMonth = new Date(b.getFullYear(), b.getMonth() + Number(jmo.dataset.jmonth), 1); renderMain(); return; }
+      const jo = e.target.closest('[data-jopen]'); if (jo) { ui.jMonth = null; e.stopPropagation(); ui.jEdit = jo.dataset.jopen; ui.selected = null; ui.dayPanel = null; setView('journal'); focusJournal(); return; }
       if (e.target.matches && e.target.matches('.ol:not(.ro)')) { const ins = e.target.querySelectorAll('.ol-line:not(.hid) .ol-in'), last = ins[ins.length - 1]; if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); } return; }
       const jc = e.target.closest('.jmeet-clock'); if (jc && !e.target.matches('.jmeet-tin')) { const ti = jc.querySelector('input'); ti.focus(); try { ti.showPicker(); } catch (x) { } return; }
       const jd = e.target.closest('[data-jdel]'); if (jd) { e.stopPropagation(); const n = taskById(jd.dataset.jdel); if (!n) return; snapshot(); unfocusOl(); trashTask(n); save(); render(); toast((isMeet(n) ? 'Meeting notes' : 'Entry') + ' moved to Recently deleted', true); return; }

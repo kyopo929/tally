@@ -878,9 +878,9 @@ body.filedrag.onnotes #content { outline: 2px dashed var(--accent); outline-offs
 
 /* ---------- Journal (outline per day) ---------- */
 .ico-journal { color: #8a5cc2; }
-.jtop { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto 10px; justify-content: flex-end; }
+.jtop { display: flex; align-items: center; gap: 8px; max-width: 880px; margin: 0 auto 10px; justify-content: flex-end; }
 .jtop .ctl { width: auto; padding: 5px 8px; }
-.jentry { max-width: 760px; margin: 0 auto 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 12px; }
+.jentry { max-width: 880px; margin: 0 auto 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 12px; }
 .jentry.editing { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 #detail .jentry { margin: 0; padding: 6px 8px 8px; }
 .jhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
@@ -942,8 +942,8 @@ button.ol-dot.folded { background: var(--accent); opacity: 1; box-shadow: 0 0 0 
 .jfrom:hover { color: var(--accent); }
 .jpage { border-color: color-mix(in srgb, #8a5cc2 40%, var(--line)) !important; box-shadow: none !important; }
 .jpage .jhead .jdate { color: #8a5cc2; }
-.jmentions { max-width: 760px; margin: 16px auto 6px !important; }
-.jnone { max-width: 760px; margin: 12px auto; }
+.jmentions { max-width: 880px; margin: 16px auto 6px !important; }
+.jnone { max-width: 880px; margin: 12px auto; }
 .jkeys { margin-right: auto; }
 @media (max-width: 760px) { .jkeys { display: none; } }
 #jump { align-items: start; padding-top: 12vh; }
@@ -1093,3 +1093,32 @@ button.ol-dot.folded { box-shadow: none; }
 .nexps .nexp { margin: 0; }
 .nexp-head { font-size: 11.5px; color: var(--muted); }
 .nexp-from { color: var(--muted); font-weight: 400; }
+
+/* Journal: entries on the left, a month calendar and what's coming up on the right */
+.jlayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; max-width: 1340px; margin: 0 auto; align-items: start; }
+.jtop .jtmr { margin-right: auto; }
+.jside { display: none; }
+@media (min-width: 1280px) {
+  .jlayout { grid-template-columns: minmax(0, 1fr) 280px; }
+  .jside { display: grid; gap: 10px; position: sticky; top: 0; }
+  .jtop .jtmr { display: none; }
+  .jmain .jentry, .jmain .jtop { max-width: none; }
+}
+.jcal { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.jcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13.5px; }
+.jcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.jcal-wd { font-size: 10.5px; color: var(--muted); padding: 2px 0 4px; }
+.jcal-d { position: relative; height: 32px; border-radius: 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.jcal-d:hover { background: var(--hover); }
+.jcal-d.has::after { content: ''; position: absolute; left: 50%; bottom: 4px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+.jcal-d.today { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); font-weight: 700; }
+.jcal-d.sel { background: var(--accent); color: var(--on-accent, #fff); }
+.jcal-d.sel.has::after { background: var(--on-accent, #fff); }
+.jplan { justify-content: center; }
+.jside-head { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.jahead { display: grid; gap: 4px; }
+.jahead-row { display: grid; gap: 1px; text-align: left; padding: 7px 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; }
+.jahead-row:hover { border-color: var(--accent); }
+.jahead-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jside-none { margin: 0; font-size: 12px; }
+.jtoday.jfuture { background: var(--accent-soft); color: var(--accent); }
