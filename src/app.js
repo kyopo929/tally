@@ -3844,11 +3844,43 @@
   let sug = null;
   const SUG_FIELDS = '.ol-in, #nBody, #dNotes, .jmeet-in, #qa, #dTitle, #nTitle';
   function hideSuggest() { sug = null; const b = $('#jsug'); if (b) b.hidden = true; }
+  // Select some words and type "[": they become a [[link]] (no list pops up)
+  document.addEventListener('keydown', e => {
+    const el = e.target;
+    if (e.key !== '[' || e.ctrlKey || e.metaKey || e.altKey || !el.matches || !el.matches('#nBody, #dNotes, #dTitle, #nTitle, #qa, .ol-in')) return;
+    const a = el.selectionStart, b = el.selectionEnd; if (a === b) return;
+    const sel = el.value.slice(a, b), lead = sel.match(/^\s*/)[0], trail = sel.match(/\s*$/)[0], word = sel.trim();
+    if (!word || word.includes('\n') || word.length > 60 || /[\[\]]/.test(word)) return;
+    e.preventDefault();
+    el.setRangeText(lead + '[[' + word + ']]' + trail, a, b, 'end');
+    const c = a + lead.length + word.length + 4; el.setSelectionRange(c, c);
+    el.dispatchEvent(new Event('input', { bubbles: true })); hideSuggest();
+  }, true);
+  // Screen position of the text cursor in an input or textarea (a hidden copy with the same styling measures it)
+  function caretRect(inp) {
+    const r = inp.getBoundingClientRect();
+    try {
+      const cs = getComputedStyle(inp), d = document.createElement('div'), span = document.createElement('span');
+      ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'paddingTop', 'paddingLeft', 'paddingRight', 'paddingBottom', 'borderTopWidth', 'borderLeftWidth', 'boxSizing', 'tabSize', 'textTransform', 'wordSpacing'].forEach(k => d.style[k] = cs[k]);
+      Object.assign(d.style, { position: 'fixed', visibility: 'hidden', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', whiteSpace: inp.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre', wordWrap: 'break-word', overflow: 'hidden' });
+      d.textContent = inp.value.slice(0, inp.selectionStart); span.textContent = '\u200b'; d.appendChild(span); document.body.appendChild(d);
+      const sr = span.getBoundingClientRect(); d.remove();
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+      return { left: Math.min(sr.left - inp.scrollLeft, r.right), top: sr.top - inp.scrollTop, bottom: sr.top - inp.scrollTop + lh };
+    } catch (e) { return { left: r.left, top: r.top, bottom: r.bottom }; }
+  }
+  // The list sits just above the line being typed (so the text around it stays visible); below only if there's no room
+  function placeSuggest(b, inp) {
+    const c = caretRect(inp), h = b.offsetHeight || 180, above = c.top - h - 6 > 8;
+    b.style.left = Math.max(8, Math.min(c.left - 12, window.innerWidth - b.offsetWidth - 8)) + 'px';
+    b.style.bottom = 'auto'; b.style.top = (above ? c.top - h - 6 : c.bottom + 6) + 'px';
+  }
   function updateSuggest(inp) {
     const pos = inp.selectionStart, m = inp.value.slice(0, pos).match(/\[\[([^\[\]\n]{0,40})$/);
     if (!m) { hideSuggest(); return; }
+    if (!m[1].trim()) { hideSuggest(); return; } // wait for a letter after [[
     const q = m[1].trim().toLowerCase(), names = linkNames();
-    const items = names.filter(x => x.toLowerCase().includes(q)).sort((a, b) => (b.toLowerCase().startsWith(q) ? 1 : 0) - (a.toLowerCase().startsWith(q) ? 1 : 0)).slice(0, 6);
+    const items = names.filter(x => x.toLowerCase().includes(q)).sort((a, b) => (b.toLowerCase().startsWith(q) ? 1 : 0) - (a.toLowerCase().startsWith(q) ? 1 : 0)).slice(0, 5);
     if (q && !names.some(x => x.toLowerCase() === q)) items.push({ create: m[1].trim() });
     if (!items.length) {
       if (q) { hideSuggest(); return; }
@@ -3862,14 +3894,11 @@
     let b = $('#jsug'); if (!b) { b = document.createElement('div'); b.id = 'jsug'; b.className = 'jsug'; b.setAttribute('role', 'listbox'); document.body.appendChild(b); }
     sug = { inp, start: pos - m[0].length, end: pos, items, sel: 0 };
     drawSuggest();
-    const r = inp.getBoundingClientRect(), bottom = inp.tagName === 'TEXTAREA' ? Math.min(r.bottom, r.top + 60) : r.bottom, below = window.innerHeight - bottom > 220;
-    b.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 260)) + 'px';
-    b.style.top = below ? (bottom + 4) + 'px' : 'auto'; b.style.bottom = below ? 'auto' : (window.innerHeight - r.top + 4) + 'px';
-    b.hidden = false;
+    b.hidden = false; placeSuggest(b, inp);
   }
   function drawSuggest() {
     const b = $('#jsug'); if (!b || !sug) return;
-    b.innerHTML = sug.items.map((x, k) => '<button type="button" role="option" class="jsug-i' + (k === sug.sel ? ' on' : '') + '" data-sug="' + k + '">' + (typeof x === 'string' ? I.link + esc(x) : I.plus + 'Link “' + esc(x.create) + '”') + '</button>').join('') + '<div class="jsug-hint">Pick a name, or keep typing</div>';
+    b.innerHTML = sug.items.map((x, k) => '<button type="button" role="option" class="jsug-i' + (k === sug.sel ? ' on' : '') + '" data-sug="' + k + '">' + (typeof x === 'string' ? I.link + esc(x) : I.plus + 'Link “' + esc(x.create) + '”') + '</button>').join('');
   }
   function pickSuggest(k) {
     if (!sug) return;
