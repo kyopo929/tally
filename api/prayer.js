@@ -18,9 +18,9 @@ module.exports = async function handler(req, res) {
     if (!Object.keys(days).length) throw new Error('empty');
     res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400'); // 6h
     res.statusCode = 200;
-    res.end(JSON.stringify({ source: 'IACAD', days }));
+    res.end(JSON.stringify({ source: 'IACAD', region: process.env.VERCEL_REGION || '', days }));
   } catch (e) {
     res.statusCode = 502;
-    res.end(JSON.stringify({ error: 'IACAD unavailable', why: String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 120) }));
+    res.end(JSON.stringify({ error: 'IACAD unavailable', region: process.env.VERCEL_REGION || '', why: String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 120) }));
   }
 };
