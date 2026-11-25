@@ -1128,3 +1128,14 @@ button.ol-dot.folded { box-shadow: none; }
 .jsplit-h { order: 9; margin-left: auto; padding: 2px 8px; font-size: 11.5px; opacity: 0; transition: opacity .12s; }
 .jentry:hover .jsplit-h, .jsplit-h:focus-visible { opacity: 1; }
 @media (hover: none) { .jsplit-h { display: none; } }
+
+.icslist { display: grid; gap: 2px; max-height: 46vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px; margin: 6px 0 10px; }
+.icsrow { display: grid; grid-template-columns: auto 92px 70px 1fr; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 7px; font-size: 13px; cursor: pointer; }
+.icsrow:hover { background: var(--hover); }
+.icsrow.off { color: var(--muted); }
+.icsrow .icsd { font-weight: 600; font-variant-numeric: tabular-nums; }
+.icsrow .icst { color: var(--muted); font-variant-numeric: tabular-nums; }
+.icsrow .icsn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icsrow em { font-style: normal; font-size: 11px; color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
+.icsall { font-size: 12.5px; }
+.icsgone { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 4px 0 8px; }

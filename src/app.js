@@ -1452,6 +1452,7 @@
         '<button type="button" data-mact="donesound">' + I.check + (S.settings.doneSound === false ? 'Sound when a task is done: off' : 'Sound when a task is done: on') + '</button>' +
         '<div class="mlabel">Your data</div>' + (syncAvailable() ? (sync.user ? '<button type="button" data-mact="signout">' + I.x + 'Sign out of sync (' + esc(sync.user.email || '') + ')</button>' : '<button type="button" data-mact="signin">' + I.repeat + 'Turn on sync\u2026</button>') : '') +
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
+        '<button type="button" data-mact="icsimport">' + I.cal + 'Import a calendar file (.ics)\u2026</button>' +
         (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
     } else if (type === 'task') {
       const t = taskById(id); if (!t) { ui.menu = null; el.hidden = true; return; }
@@ -4251,6 +4252,130 @@
     if (el && el.type === 'date' && el.value && Number(el.value.slice(0, 4)) < 1900) e.stopImmediatePropagation();
   }, true));
 
+  /* ---------- import a calendar file (.ics) ---------- */
+  // Events come in as Tally events (with their notes, place and reminder). Each keeps the file's id (icsUid) and the
+  // calendar's name (icsFrom), so importing a newer version of the same file updates them instead of adding copies.
+  // A timed event that runs past midnight stays on the day it starts; the end time goes in its notes.
+  function parseIcs(text) {
+    const lines = String(text || '').replace(/\r\n?/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+    const cal = { name: '', events: [] }; let ev = null, inAlarm = false;
+    const unesc = v => v.replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
+    for (const line of lines) {
+      const m = line.match(/^([A-Za-z0-9-]+)((?:;[^:]*)?):(.*)$/); if (!m) continue;
+      const name = m[1].toUpperCase(), params = m[2] || '', val = m[3];
+      if (name === 'BEGIN' && val === 'VEVENT') { ev = {}; continue; }
+      if (name === 'END' && val === 'VEVENT') { if (ev && ev.start) cal.events.push(ev); ev = null; continue; }
+      if (name === 'BEGIN' && val === 'VALARM') { inAlarm = true; continue; }
+      if (name === 'END' && val === 'VALARM') { inAlarm = false; continue; }
+      if (!ev) { if (name === 'X-WR-CALNAME') cal.name = unesc(val).trim(); continue; }
+      if (inAlarm) { if (name === 'TRIGGER' && !/VALUE=DATE-TIME/i.test(params) && ev.alarm == null) ev.alarm = icsDur(val); continue; }
+      if (name === 'SUMMARY') ev.title = unesc(val).trim();
+      else if (name === 'DESCRIPTION') ev.desc = unesc(val).trim();
+      else if (name === 'LOCATION') ev.loc = unesc(val).trim();
+      else if (name === 'UID') ev.uid = val.trim();
+      else if (name === 'RRULE') ev.rrule = val;
+      else if (name === 'STATUS' && /CANCELLED/i.test(val)) ev.cancelled = true;
+      else if (name === 'DTSTART' || name === 'DTEND') {
+        const tz = (params.match(/TZID=([^;:]+)/i) || [])[1], allDay = /VALUE=DATE(?!-)/i.test(params) || /^\d{8}$/.test(val);
+        ev[name === 'DTSTART' ? 'start' : 'end'] = icsTime(val, tz && tz.replace(/^"|"$/g, ''), allDay);
+      }
+    }
+    return cal;
+  }
+  function icsDur(v) { // "-PT2H" → minutes before (positive)
+    const m = v.match(/^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i); if (!m) return null;
+    const mins = (+m[2] || 0) * 10080 + (+m[3] || 0) * 1440 + (+m[4] || 0) * 60 + (+m[5] || 0);
+    return m[1] === '-' ? mins : -mins;
+  }
+  // A time in the file, turned into this computer's local date and time
+  function icsTime(v, tz, allDay) {
+    const m = v.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/); if (!m) return null;
+    const [y, mo, d, h, mi] = [+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0)];
+    if (allDay || !m[4]) return { allDay: true, date: m[1] + '-' + m[2] + '-' + m[3] };
+    let ms;
+    if (m[7]) ms = Date.UTC(y, mo - 1, d, h, mi);
+    else if (tz) {
+      try { // wall time in that zone → the moment it is
+        const guess = Date.UTC(y, mo - 1, d, h, mi);
+        const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(guess)).map(x => [x.type, x.value]));
+        const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute);
+        ms = guess - (shown - guess);
+      } catch (e) { ms = new Date(y, mo - 1, d, h, mi).getTime(); }
+    } else ms = new Date(y, mo - 1, d, h, mi).getTime();
+    const L = new Date(ms);
+    return { allDay: false, date: D.toISO(L), time: String(L.getHours()).padStart(2, '0') + ':' + String(L.getMinutes()).padStart(2, '0'), ms };
+  }
+  function icsRecur(rr, startISO) {
+    if (!rr) return null;
+    const f = (rr.match(/FREQ=(\w+)/i) || [])[1], n = +((rr.match(/INTERVAL=(\d+)/i) || [])[1] || 1), d = D.fromISO(startISO);
+    const freq = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' }[(f || '').toUpperCase()];
+    return freq ? { freq, interval: n, anchorDay: d.getDate() } : null;
+  }
+  let icsPending = null;
+  function icsToItems(cal) {
+    return cal.events.filter(e => !e.cancelled && e.start && e.start.date).map((e, k) => {
+      const s = e.start, en = e.end; const it = { uid: e.uid || ('noid:' + (e.title || '') + s.date + (s.time || '')), title: e.title || 'Untitled event', due: s.date, time: s.allDay ? null : s.time, notes: '', alarm: e.alarm, recur: icsRecur(e.rrule, s.date), on: true, k };
+      if (s.allDay && en && en.allDay) { const last = D.toISO(D.addDays(D.fromISO(en.date), -1)); if (last > s.date) it.end = last; }
+      const extra = [];
+      // the end time goes in the notes ("until 11:59pm" says nothing, so that one is left out)
+      if (!s.allDay && en && !en.allDay && !(en.date === s.date && en.time >= '23:59')) { const mins = Math.round((en.ms - s.ms) / 60000); extra.push('Until ' + D.fmtTime(en.time) + (en.date !== s.date ? ' (next day)' : '') + (mins > 0 ? ', ' + (mins >= 60 ? Math.floor(mins / 60) + 'h' + (mins % 60 ? ' ' + (mins % 60) + 'm' : '') : mins + 'm') : '')); }
+      if (e.loc) extra.push('Place: ' + e.loc);
+      it.notes = [extra.join('\n'), e.desc || ''].filter(Boolean).join('\n\n');
+      if (e.rrule && !it.recur) it.notes += (it.notes ? '\n\n' : '') + '(Repeats in the original calendar; imported once.)';
+      return it;
+    }).sort((a, b) => (a.due + (a.time || '')).localeCompare(b.due + (b.time || '')));
+  }
+  function icsSheetHtml() {
+    const p = icsPending, n = p.items.filter(x => x.on).length;
+    const have = new Map(S.tasks.filter(t => t.icsUid).map(t => [t.icsUid, t]));
+    const gone = p.cal ? S.tasks.filter(t => t.icsFrom && t.icsFrom === p.cal && !p.items.some(x => x.uid === t.icsUid)) : [];
+    const row = it => { const d = D.fromISO(it.due); return '<label class="icsrow' + (it.on ? '' : ' off') + '"><input type="checkbox" data-icson="' + it.k + '"' + (it.on ? ' checked' : '') + '><span class="icsd">' + D.WD_LONG[d.getDay()].slice(0, 3) + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</span><span class="icst">' + (it.time ? D.fmtTime(it.time) : it.end ? 'to ' + D.dueLabel(it.end) : 'All day') + '</span><span class="icsn">' + esc(it.title) + (have.has(it.uid) ? ' <em>update</em>' : '') + '</span></label>'; };
+    return '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="icsTitle"><div class="sheet-head"><h2 id="icsTitle">Import ' + esc(p.cal || p.file) + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
+      (p.items.length ? '<p>' + p.items.length + ' event' + (p.items.length === 1 ? '' : 's') + ' in the file. Untick any you don’t want. They come in as events, with their notes and reminders.' + (p.items.some(x => have.has(x.uid)) ? ' Ones marked <em>update</em> are already in Tally and will be updated.' : '') + '</p>' +
+        '<div class="icsall"><button type="button" class="linkbtn" data-icsall="1">Tick all</button> · <button type="button" class="linkbtn" data-icsall="0">Untick all</button></div><div class="icslist">' + p.items.map(row).join('') + '</div>' : '<p>No events found in this file.</p>') +
+      (gone.length ? '<label class="chk icsgone"><input type="checkbox" id="icsGone"' + (p.dropGone !== false ? ' checked' : '') + '> Also remove ' + gone.length + ' event' + (gone.length === 1 ? '' : 's') + ' from an earlier import of “' + esc(p.cal) + '” that ' + (gone.length === 1 ? 'is' : 'are') + ' no longer in this file</label>' : '') +
+      '<p class="hint">Events Tally sends to Outlook include these too, so there’s no need to import the same file into Outlook as well.</p>' +
+      '<div class="row" style="gap:8px;margin-top:10px"><button type="button" class="chipbtn solid" data-icsgo="1"' + (n || gone.length ? '' : ' disabled') + '>Import ' + n + ' event' + (n === 1 ? '' : 's') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button></div></div></div>';
+  }
+  function openIcsPicker() {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.ics,text/calendar'; inp.hidden = true; document.body.appendChild(inp);
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+      try {
+        const cal = parseIcs(await f.text());
+        icsPending = { file: f.name, cal: cal.name || f.name.replace(/\.ics$/i, ''), items: icsToItems(cal) };
+        const el = $('#sheet'); el.innerHTML = icsSheetHtml(); el.hidden = false;
+      } catch (e) { toast('That file couldn’t be read as a calendar.'); }
+    });
+    inp.click();
+  }
+  function doIcsImport() {
+    const p = icsPending; if (!p) return; snapshot();
+    const byUid = new Map(S.tasks.filter(t => t.icsUid).map(t => [t.icsUid, t]));
+    let added = 0, updated = 0, removed = 0;
+    for (const it of p.items.filter(x => x.on)) {
+      let t = byUid.get(it.uid);
+      if (t) updated++; else { t = newTask({ type: 'event', listId: 'inbox', icsUid: it.uid }); added++; }
+      Object.assign(t, { title: it.title, due: it.due, time: it.time, notes: it.notes, recur: it.recur, icsFrom: p.cal });
+      if (it.end) t.end = it.end; else delete t.end;
+      t.reminder = it.alarm != null && it.time ? D.toLocalDT(new Date(D.parseLocalDT(it.due + 'T' + it.time).getTime() - it.alarm * 60000)) : null; t.remindedFor = null;
+    }
+    const chk = $('#icsGone');
+    if (chk && chk.checked) S.tasks.filter(t => t.icsFrom === p.cal && !p.items.some(x => x.uid === t.icsUid)).forEach(t => { trashTask(t); removed++; });
+    icsPending = null; closeSheet(); save(); render();
+    toast([added && added + ' added', updated && updated + ' updated', removed && removed + ' removed'].filter(Boolean).join(', ') + (added + updated + removed ? '' : 'Nothing imported'), true);
+  }
+  function bindIcs() {
+    const el = $('#sheet');
+    el.addEventListener('change', e => { if (!icsPending || !$('#icsTitle')) return; if (e.target.dataset.icson != null) { icsPending.items[icsPending.items.findIndex(x => x.k === +e.target.dataset.icson)].on = e.target.checked; el.innerHTML = icsSheetHtml(); } if (e.target.id === 'icsGone') icsPending.dropGone = e.target.checked; });
+    el.addEventListener('click', e => {
+      if (!icsPending || !$('#icsTitle')) return;
+      const a = e.target.closest('[data-icsall]'); if (a) { icsPending.items.forEach(x => x.on = a.dataset.icsall === '1'); el.innerHTML = icsSheetHtml(); return; }
+      if (e.target.closest('[data-icsgo]')) doIcsImport();
+    });
+    $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="icsimport"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openIcsPicker(); } }, true);
+  }
+
   /* ---------- boot ---------- */
   loadSyncMeta(); S = load(); persistLocal(); applyTheme(); applyTypeColors();
   ui.view = startView(); // Settings → Pages & swiping
@@ -4267,7 +4392,7 @@
   try { const q = new URLSearchParams(location.search).get('open'); if (q) { history.replaceState(null, '', location.pathname); openTask(q); setTimeout(() => openTask(q), 2500); } } catch (e) { }
   if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }
