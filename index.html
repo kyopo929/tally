@@ -3605,7 +3605,22 @@ button.ol-dot.folded { box-shadow: none; }
     ['#Bills', 'Puts it in that list. The first few letters are enough.', 'Electricity bill #bills'],
     ['start mon, starts next week, from dec 1', 'Start date: hidden from My Day until then', 'Plan the party start next week due dec 20'],
     ['birthday, bday, anniversary', 'Becomes a yearly event (no checkbox). Or switch the box to Event.', 'Mom\u2019s birthday mar 12'],
-    ['dec 20 - dec 31', 'A date range makes a multi-day event, like a vacation', 'Ali vacation dec 20 - dec 31']
+    ['dec 20 - dec 31', 'A date range makes a multi-day event, like a vacation', 'Ali vacation dec 20 - dec 31'],
+    ['waiting on Ravi: …, wf Ravi …', 'Waiting on someone: Tally reminds you to follow up', 'waiting on Ravi: signed contract']
+  ];
+  const hasLists = () => S.lists.some(l => !l.system);
+  // Things you type while writing (not in the add box)
+  const WRITING = [
+    ['<code>[ ]</code> or <code>[]</code> at the start of a line', '<b>Journal:</b> the line becomes a real task with a checkbox. Dates, times and repeats in it work like the add box (<i>[ ] call bank fri 10am</i>). Ticking it in the journal or in your lists ticks both.<br><b>Notes:</b> a simple checkbox (not a task). Or use the Checkbox button.'],
+    ['<code>[[Name]]</code>', 'Links a person or thing, like <i>[[Aidan]]</i> or <i>[[BK Parts]]</i>. Click a link to open its page: facts about it on top, then every mention. Works in the journal, notes, task names and task notes.'],
+    ['<em>(after the first time)</em>', 'Once a name has been in [[ ]], writing it later with a capital letter links it by itself. Turn that off for a name with the Auto-link switch on its page.'],
+    ['Select words, then <code>[</code>', 'Turns the selected words into a [[link]].'],
+    ['<code>[[</code> then a few letters', 'Shows names you\u2019ve used before. Pick one, or keep typing a new name.'],
+    ['<code>waiting on Ravi: signed contract</code>', 'A task you\u2019re waiting on someone for (also <i>waiting for</i>, <i>wf</i>). Tally nudges you to follow up after 3 days. Works in the add box and in journal <code>[ ]</code> lines.'],
+    ['<code>•</code> or <code>-</code> then a space', '<b>Notes:</b> a bullet. Enter starts the next one; Enter on an empty one moves it out a level, or ends the list.'],
+    ['<code>Tab</code> <code>Shift Tab</code>', 'Moves a line in or out a level (sub-bullets).'],
+    ['<em>(Meeting button)</em>', '<b>Journal:</b> starts meeting notes with a name, kept together on that meeting\u2019s page.'],
+    ['<em>(Notes: photos and PDFs)</em>', 'IDs, visas, passports and licenses are read automatically; each one\u2019s expiry date becomes a task on your calendar.']
   ];
   const SHEET = [
     ['Dates', [
@@ -3642,11 +3657,12 @@ button.ol-dot.folded { box-shadow: none; }
     const el = $('#sheet');
     el.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet-head"><h2 id="sheetTitle">Examples: what you can type</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
       '<p>Type a task, then add any of these anywhere in the line, in any order. They’re taken out of the title, and the tags under the box show what was understood. Click a "Try" line to fill it in.</p>' +
-      '<p class="combo">Mix them: <button type="button" class="example" data-try="Pay rent every 1st 9am #bills remind 1h before">Pay rent every 1st 9am #bills remind 1h before</button></p>' +
-      '<h3>Quick reference</h3>' + rowsHtml(QUICK) +
+      (() => { const ex = 'Pay rent every 1st 9am' + (hasLists() ? ' #bills' : '') + ' remind 1h before'; return '<p class="combo">Mix them: <button type="button" class="example" data-try="' + ex + '">' + ex + '</button></p>'; })() +
+      '<h3>Quick reference</h3>' + rowsHtml(QUICK.filter(r => hasLists() || !r[0].startsWith('#'))) +
       '<h3 class="big">All the details</h3>' +
-      SHEET.map(([h, rows]) => '<h3>' + h + '</h3>' + rowsHtml(rows)).join('') +
-      '<h3>Keyboard</h3><table><tr><td><code>Ctrl K</code> <code>Q</code></td><td>Jump to the add box</td></tr><tr><td><code>?</code></td><td>Open these examples</td></tr><tr><td><code>Ctrl</code> + click, <code>Shift</code> + click</td><td>Select several tasks, then act on them together</td></tr><tr><td><code>Ctrl A</code></td><td>Select every task on screen</td></tr><tr><td><code>Delete</code></td><td>Move selected task(s) to Recently deleted</td></tr><tr><td><code>Esc</code></td><td>Close panels or clear a selection</td></tr></table></div></div>';
+      SHEET.filter(([h]) => hasLists() || h !== 'Lists').map(([h, rows]) => '<h3>' + h + '</h3>' + rowsHtml(rows)).join('') +
+      '<h3 class="big">Writing in the journal and notes</h3><table>' + WRITING.map(([k, d]) => '<tr><td>' + k + '</td><td>' + d + '</td></tr>').join('') + '</table>' +
+      '<h3>Keyboard</h3><table><tr><td><code>Ctrl K</code> <code>Q</code></td><td>Jump to the add box</td></tr><tr><td><code>Ctrl O</code></td><td>Jump to anything: a day, a person or page, a note, a task</td></tr><tr><td><code>/</code></td><td>Search</td></tr><tr><td><code>Tab</code> <code>Shift Tab</code></td><td>In the journal and notes: move a line in or out a level</td></tr><tr><td><code>?</code></td><td>Open these examples</td></tr><tr><td><code>Ctrl</code> + click, <code>Shift</code> + click</td><td>Select several tasks, then act on them together</td></tr><tr><td><code>Ctrl A</code></td><td>Select every task on screen</td></tr><tr><td><code>Delete</code></td><td>Move selected task(s) to Recently deleted</td></tr><tr><td><code>Esc</code></td><td>Close panels or clear a selection</td></tr></table></div></div>';
     el.hidden = false;
     $('[data-close]', el).focus();
   }
