@@ -2743,6 +2743,13 @@
     return '<div class="renewrow"><span>' + I.bell + 'Remind me</span><select class="ctl" id="nLead" aria-label="When to remind you">' + LEADS.map(([d, n]) => '<option value="' + d + '"' + (leadOf(t) === d ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' +
       '<button type="button" class="linkbtn" data-openitem="' + et.id + '" title="Open the task">Open task</button></div>';
   }
+  // Notes have no expiry date field. A license, visa or passport found in a note's photos or PDFs still gets its
+  // "… expires" task (on the calendar and in tasks); the note just says what was found, with a way to undo it.
+  function noteExpLine(raw) {
+    const n = E(raw); if (!n.expires) return '';
+    const x = expInfo(n.expires);
+    return '<div class="nexp' + (x ? ' ' + x.cls : '') + '">' + I.cal + '<span>' + (n.expAuto ? 'Found automatically: ' : '') + '<b>' + esc(docName(raw)) + ' expires ' + fmtLong(n.expires) + '</b>. It’s on your calendar and tasks, with reminders. <button type="button" class="example" data-ndact="clearexp">Not right? Remove</button></span></div>';
+  }
   function expField(t) {
     const x = expInfo(t.expires);
     return '<div class="field expfield"><label for="nExp">Expiry date</label><div class="row2"><input type="date" class="ctl" id="nExp" value="' + (t.expires || '') + '">' + (t.expires ? '<button type="button" class="chipbtn" data-ndact="clearexp">Clear</button>' : '') + '</div>' +
@@ -2845,7 +2852,7 @@
   function autoExpiryScan() {
     const found = [], backOnly = []; let moved = 0, fixed = 0;
     for (let pass = 0; pass < 2; pass++) for (const t of S.tasks) { // second pass: names borrowed from a twin passport
-      if (!isDoc(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // Important Documents only; notes have no expiry date
+      if (!isPaper(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // notes too: a passport or visa photo in a note still gets its expiry task
       if (t.expAuto && t.titleAuto === undefined && KIND_NAMES.includes(t.title)) t.titleAuto = true; // named by an earlier version
       if (t.holderAuto && t.holder && isMe(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; }
       if (t.holderAuto && t.holder && !plausibleName(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; } // a misread name from before
@@ -3008,7 +3015,7 @@
         ? '<div class="nitems">' + items.filter(i => !i.done).map(itemRow).join('') + '<input id="nNewItem" class="nitext add" placeholder="+ List item" aria-label="Add list item">' + (items.some(i => i.done) ? '<div class="nlabel">' + items.filter(i => i.done).length + ' checked</div>' + items.filter(i => i.done).map(itemRow).join('') : '') + '</div>'
         : noteTools() + (hasRich(n.body) && ui.nRaw !== n.id ? '<div class="nrich-wrap" data-nraw="1" title="Click to edit">' + richBody(n.body, n.id) + '</div><textarea id="nBody" class="ctl nbody-in" hidden aria-label="Note">' + esc(n.body || '') + '</textarea>' : '<textarea id="nBody" class="ctl nbody-in" placeholder="Note" aria-label="Note">' + esc(n.body || '') + '</textarea>')) +
       '<div class="links" id="dLinks">' + linksHtml({ title: n.title, notes: n.kind === 'list' ? items.map(i => i.text).join(' ') : n.body }) + '</div>' +
-      attGrid(n) + dropZone() + (n.expires ? expField(n) : '') + // notes have no expiry date; one set by an earlier version can still be cleared here
+      attGrid(n) + dropZone() + noteExpLine(raw) +
       
       '</div><div class="d-foot nfoot"><button type="button" class="chipbtn" data-ndact="archive">' + I.archive + (n.archived ? 'Unarchive' : 'Archive') + '</button><button type="button" class="chipbtn" data-ndact="lock">' + I.lock + (raw.locked ? 'Unlock' : 'Lock') + '</button><button type="button" class="chipbtn" data-ndact="move">Move to Important Documents</button><span class="spacer"></span><button type="button" class="danger-btn" data-ndact="del">Delete</button></div>';
   }
