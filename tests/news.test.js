@@ -47,6 +47,10 @@ t('big moments pass', () => {
   assert.ok(!soft({ title: 'Tom Cruise dies at 64', source: 'Variety' }));
   assert.ok(soft({ title: 'Who won Dancing With the Stars? Season 35 winner crowned', source: 'USA Today' }));
 });
+t('celebrity + foreign-language trends dropped', () => {
+  assert.ok(soft({ term: 'stanley tucci', title: 'The 2009 co-star Stanley Tucci wanted to work with again', source: 'X' }));
+  assert.ok(soft({ term: 'día de acción de gracias', title: 'Última hora', source: 'CNN' }));
+});
 t('same story across outlets', () => {
   assert.ok(sameStory('Abrego Garcia Voluntarily Leaves U.S., Ending 20-Month Legal Fight', 'Abrego Garcia Will Voluntarily Leave U.S., Ending 20-Month Legal Ordeal'));
   assert.ok(!sameStory('Asian Stocks to Slide as AI Trade Doubts Resurface', 'US court convicts Huawei for fraud'));

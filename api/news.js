@@ -25,7 +25,8 @@ module.exports = async function handler(req, res) {
   const urls = [TOP, section('NATION'), section('WORLD'), section('BUSINESS'), section('SPORTS'), section('ENTERTAINMENT'), TRENDS];
   const [top, us, world, biz, sports, ent, trd] = await Promise.allSettled(urls.map(get));
   const list = (r, n) => r.status === 'fulfilled' ? parseNews(r.value, n || 40) : [];
-  const softTitles = new Set(list(sports, 80).concat(list(ent, 80)).map(s => key(s.title)));
+  const softList = list(sports, 80).concat(list(ent, 80)).map(s => s.title);
+  const softTitles = new Set(softList.map(key)); softTitles.list = softList;
   const real = arr => arr.filter(x => !soft(x, softTitles));
   const all = real(list(top, 40));
   const stories = all.slice(0, 8);
