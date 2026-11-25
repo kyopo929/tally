@@ -475,19 +475,22 @@
   }
   function newsHtml() {
     let h = tickerHtml() + '<div class="news-head"><span>Top stories</span><button type="button" class="news-ref' + (newsBusy ? ' busy' : '') + '" id="newsRefresh" title="Refresh' + (news && news.at ? ' (updated ' + agoShort(new Date(news.at).toISOString()) + ')' : '') + '" aria-label="Refresh top stories">↻</button></div><ol class="news-list">';
-    for (const s of (news.stories || [])) h += '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a><span class="news-meta">' + esc(s.source || '') + (s.source && s.at ? ' · ' : '') + (s.at ? agoShort(s.at) : '') + '</span></li>';
-    return h + '</ol>';
+    const li = s => '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a><span class="news-meta">' + esc(s.source || '') + (s.source && s.at ? ' · ' : '') + (s.at ? agoShort(s.at) : '') + '</span></li>';
+    for (const s of (news.stories || [])) h += li(s);
+    h += '</ol>';
+    if ((news.dubai || []).length) { h += '<div class="news-head news-sub"><span>Dubai</span></div><ol class="news-list">'; for (const s of news.dubai) h += li(s); h += '</ol>'; }
+    return h;
   }
   function drawNews() { const b = $('#newsBox'); if (b) b.innerHTML = newsHtml(); else if (newsShown()) renderSide(); }
   async function refreshNews(force) {
     if (newsOff || newsBusy || !newsHost() || isPhone()) return;
-    if (!force && news && news.v === 3 && Date.now() - news.at < NEWS_EVERY) return;
+    if (!force && news && news.v === 4 && Date.now() - news.at < NEWS_EVERY) return;
     newsBusy = true; if (news) drawNews();
     try {
       const r = await fetch('/api/news', { cache: 'no-store' });
       if (r.status === 404) { newsOff = true; news = null; try { localStorage.removeItem(NEWS_KEY); } catch (e) { } renderSide(); return; }
       const j = r.ok ? await r.json() : null;
-      if (j && ((j.stories || []).length || (j.breaking || []).length || (j.trending || []).length)) { news = { v: 3, at: Date.now(), stories: j.stories || [], breaking: j.breaking || [], trending: j.trending || [] }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
+      if (j && ((j.stories || []).length || (j.breaking || []).length || (j.trending || []).length)) { news = { v: 4, at: Date.now(), stories: j.stories || [], dubai: j.dubai || [], breaking: j.breaking || [], trending: j.trending || [] }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
     } catch (e) { }
     newsBusy = false; if (news) drawNews();
   }
