@@ -448,7 +448,8 @@
   /* ---------- sidebar boxes: weather, clocks, stocks, prayer, top stories, Dubai (computer only, original site only) ---------- */
   // Settings → Sidebar boxes. Saved on this computer only (not in the code or the synced data).
   const NEWS_KEY = 'tally-news', NEWS_EVERY = 10 * 60000, SIDE_KEY = 'tally-side', HIDE_KEY = 'tally-news-hidden';
-  const SIDE_DEFS = [['weather', 'Weather (Dubai)'], ['clocks', 'Clocks: Dubai, Los Angeles, Seoul'], ['stocks', 'Stocks'], ['prayer', 'Prayer times: Asr, Maghrib, Isha (Dubai)'], ['news', 'Top stories'], ['dubai', 'Dubai news']];
+  const SIDE_DEFS = [['weather', 'Weather'], ['clocks', 'Clocks'], ['stocks', 'Stocks'], ['prayer', 'Prayer times (Dubai)'], ['news', 'Top stories'], ['dubai', 'Dubai news']];
+  const PRAYERS = [['fajr', 'Fajr'], ['sunrise', 'Sunrise'], ['dhuhr', 'Dhuhr'], ['asr', 'Asr'], ['maghrib', 'Maghrib'], ['isha', 'Isha']];
   const SIDE_NAME = Object.fromEntries(SIDE_DEFS);
   const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
@@ -456,9 +457,12 @@
     const c = lsGet(SIDE_KEY, {}), def = SIDE_DEFS.map(d => d[0]);
     const order = (c.order || []).filter(v => def.includes(v)); def.forEach(v => { if (!order.includes(v)) order.push(v); });
     let syms = c.syms; if (!syms) { try { syms = (localStorage.getItem('tally-stock-symbols') || '').split(',').filter(Boolean); } catch (e) { syms = []; } } // from the first version
-    return { order, off: new Set(c.off || ['prayer']), syms, unit: c.unit === 'F' ? 'F' : 'C' };
+    return { order, off: new Set(c.off || ['prayer']), syms, unit: c.unit === 'F' ? 'F' : 'C',
+      wx: c.wx || { name: 'Dubai', label: 'Dubai, United Arab Emirates', lat: 25.2048, lon: 55.2708 },
+      clocks: c.clocks || [{ name: 'Los Angeles', tz: 'America/Los_Angeles' }, { name: 'Dubai', tz: 'Asia/Dubai' }, { name: 'Seoul', tz: 'Asia/Seoul' }],
+      nTop: c.nTop || 5, nDubai: c.nDubai || 3, prayers: c.prayers || ['asr', 'maghrib', 'isha'] };
   }
-  function setSide(c) { lsSet(SIDE_KEY, { order: c.order, off: [...c.off], syms: c.syms, unit: c.unit }); }
+  function setSide(c) { lsSet(SIDE_KEY, { order: c.order, off: [...c.off], syms: c.syms, unit: c.unit, wx: c.wx, clocks: c.clocks, nTop: c.nTop, nDubai: c.nDubai, prayers: c.prayers }); }
   let news = lsGet(NEWS_KEY, null);
   let newsOff = false, newsBusy = false;
   const newsHost = () => location.protocol === 'https:' && !/claude/.test(location.hostname);
@@ -489,21 +493,35 @@
     return '<svg class="wx-ico" viewBox="0 0 24 24" aria-hidden="true">' + p + '</svg>';
   }
   function weatherHtml(c) {
-    const w = news && news.wx; if (!w) return head('Weather · Dubai') + '<div class="stock-note">Loading…</div>';
+    const w = news && news.wx, title = 'Weather · ' + esc(c.wx.name);
+    if (!w || w.for !== c.wx.label) return head(title) + '<div class="stock-note">Loading…</div>';
     const T = v => Math.round(c.unit === 'F' ? v * 9 / 5 + 32 : v) + '°';
-    return head('Weather · Dubai') + '<a class="wx" href="https://www.accuweather.com/en/ae/dubai/323091/weather-forecast/323091" target="_blank" rel="noopener noreferrer">' + wxIcon(w.code, w.day) +
+    return head(title) + '<a class="wx" href="https://www.google.com/search?q=' + encodeURIComponent('weather ' + c.wx.label) + '" target="_blank" rel="noopener noreferrer">' + wxIcon(w.code, w.day) +
       '<span class="wx-t">' + T(w.temp) + '</span><span class="wx-d"><b>' + esc(WX[w.code] || '') + '</b><span>Feels ' + T(w.feels) + ' · H ' + T(w.hi) + ' L ' + T(w.lo) + '</span><span>Humidity ' + Math.round(w.hum) + '%</span></span></a>';
   }
   async function refreshWeather() {
+    const p = sideCfg().wx;
     try {
-      const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=Asia%2FDubai', { cache: 'no-store' });
+      const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=' + p.lat + '&longitude=' + p.lon + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto', { cache: 'no-store' });
       const j = r.ok ? await r.json() : null; if (!j || !j.current) return;
-      news.wx = { temp: j.current.temperature_2m, feels: j.current.apparent_temperature, hum: j.current.relative_humidity_2m, code: j.current.weather_code, day: !!j.current.is_day, hi: j.daily.temperature_2m_max[0], lo: j.daily.temperature_2m_min[0], at: Date.now() };
+      news.wx = { for: p.label, temp: j.current.temperature_2m, feels: j.current.apparent_temperature, hum: j.current.relative_humidity_2m, code: j.current.weather_code, day: !!j.current.is_day, hi: j.daily.temperature_2m_max[0], lo: j.daily.temperature_2m_min[0], at: Date.now() };
     } catch (e) { }
+  }
+  // City search (Open-Meteo geocoding): name, region, country, coordinates and time zone
+  let cityRes = {}, cityTimer = null;
+  async function searchCities(q) {
+    if (q.trim().length < 2) return [];
+    try {
+      const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&format=json&name=' + encodeURIComponent(q.trim()));
+      const j = r.ok ? await r.json() : null;
+      return ((j && j.results) || []).filter(x => x.timezone).map(x => ({ name: x.name, label: [x.name, x.admin1 && x.admin1 !== x.name ? x.admin1 : '', x.country].filter(Boolean).join(', '), lat: x.latitude, lon: x.longitude, tz: x.timezone }));
+    } catch (e) { return []; }
   }
 
   // Analog clocks
-  const CLOCKS = [['Dubai', 'Asia/Dubai'], ['Los Angeles', 'America/Los_Angeles'], ['Seoul', 'Asia/Seoul']];
+  // minutes ahead of UTC right now in a time zone (for ordering clocks from earliest to latest)
+  function tzOffset(tz) { const z = zoneNow(tz), [y, mo, d] = z.date.split('-').map(Number); return Math.round((Date.UTC(y, mo - 1, d, z.h, z.m) - Date.now()) / 60000); }
+  const LOCAL_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Dubai'; } catch (e) { return 'Asia/Dubai'; } })();
   function clockFace(tz) {
     const z = zoneNow(tz), night = z.h < 6 || z.h >= 18;
     const hand = (deg, len, w) => { const a = (deg - 90) * Math.PI / 180; return '<line x1="20" y1="20" x2="' + (20 + len * Math.cos(a)).toFixed(2) + '" y2="' + (20 + len * Math.sin(a)).toFixed(2) + '" stroke-width="' + w + '" stroke-linecap="round"/>'; };
@@ -512,11 +530,12 @@
       hand((z.h % 12) * 30 + z.m / 2, 9.5, 2.2) + hand(z.m * 6 + z.s / 10, 14, 1.5) + '</g><circle class="pin" cx="20" cy="20" r="1.6"/></svg>';
   }
   function clocksInner() {
-    const home = zoneNow('Asia/Dubai').date;
-    return CLOCKS.map(([n, tz]) => { const z = zoneNow(tz), dd = z.date === home ? '' : z.date > home ? ' +1' : ' −1';
-      return '<div class="clk" title="' + n + '">' + clockFace(tz) + '<b>' + n + '</b><span>' + t12(z.h + ':' + z.m) + dd + '</span></div>'; }).join('');
+    const home = zoneNow(LOCAL_TZ).date, list = sideCfg().clocks.slice().sort((a, b) => tzOffset(a.tz) - tzOffset(b.tz));
+    if (!list.length) return '<div class="stock-note">Choose cities in Settings → Sidebar boxes.</div>';
+    return list.map(({ name, tz }) => { const z = zoneNow(tz), dd = z.date === home ? '' : z.date > home ? ' +1' : ' −1';
+      return '<div class="clk" title="' + esc(name) + '">' + clockFace(tz) + '<b>' + esc(name) + '</b><span>' + t12(z.h + ':' + z.m) + dd + '</span></div>'; }).join('');
   }
-  const clocksHtml = () => head('Clocks') + '<div class="clocks" id="wClocks">' + clocksInner() + '</div>';
+  const clocksHtml = () => head('Clocks') + '<div class="clocks" id="wClocks" style="grid-template-columns:repeat(' + Math.max(1, sideCfg().clocks.length) + ',1fr)">' + clocksInner() + '</div>';
 
   // Stocks
   function stocksHtml(c) {
@@ -542,31 +561,45 @@
 
   // Prayer times (Dubai)
   function prayerHtml() {
-    const p = news && news.prayer, today = zoneNow('Asia/Dubai'), d = p && p.days && p.days[today.date];
-    if (!d) return head('Prayer times · Dubai') + '<div class="stock-note">' + (p && p.err ? 'Couldn’t load prayer times. Trying again soon.' : 'Loading…') + '</div>';
-    const now = today.h * 60 + today.m, mins = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
-    const list = [['Asr', d.asr], ['Maghrib', d.maghrib], ['Isha', d.isha]];
+    const c = sideCfg(), p = news && news.prayer, today = zoneNow('Asia/Dubai');
+    if (!c.prayers.length) return head('Prayer times · Dubai') + '<div class="stock-note">Choose prayers in Settings → Sidebar boxes.</div>';
+    let d = p && p.days && p.days[today.date];
+    if (!d || !d.fajr) return head('Prayer times · Dubai') + '<div class="stock-note">' + (p && p.err ? 'Couldn’t load prayer times. Trying again soon.' : 'Loading…') + '</div>';
+    const mins = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
+    let now = today.h * 60 + today.m, label = '';
+    let list = PRAYERS.filter(x => c.prayers.includes(x[0])).map(([k, n]) => [n, d[k]]);
+    // after the last one today, show tomorrow's
+    if (!list.some(x => mins(x[1]) > now)) {
+      const tmr = new Date(Date.UTC(...today.date.split('-').map((v, i) => i === 1 ? v - 1 : +v)) + 86400000).toISOString().slice(0, 10), d2 = p.days[tmr];
+      if (d2 && d2.fajr) { d = d2; now -= 1440; label = ' · tomorrow'; list = PRAYERS.filter(x => c.prayers.includes(x[0])).map(([k, n]) => [n, d[k]]); }
+    }
     const next = list.find(x => mins(x[1]) > now);
-    return head('Prayer times · Dubai') + '<ul class="pray">' + list.map(([n, hm]) => {
+    return head('Prayer times · Dubai' + label) + '<ul class="pray">' + list.map(([n, hm]) => {
       const left = mins(hm) - now, isNext = next && next[0] === n;
       return '<li class="' + (isNext ? 'next' : left <= 0 ? 'past' : '') + '"><span>' + n + '</span><b>' + t12(hm) + '</b>' + (isNext ? '<em>in ' + (left >= 60 ? Math.floor(left / 60) + 'h ' : '') + (left % 60) + 'm</em>' : '<em></em>') + '</li>';
     }).join('') + '</ul>';
   }
-  // Aladhan's Dubai method (IACAD blocks outside access). Against IACAD's official times it is within a minute:
-  // Asr and Isha match on most days, and Maghrib comes out one minute early, so we add that minute back.
+  // Aladhan's Dubai method (IACAD blocks outside access). Checked against IACAD's official November 2026 times:
+  // Fajr, Dhuhr, Asr and Isha match or are within a minute; Maghrib is a minute early and Sunrise 4 minutes late,
+  // so those two are corrected.
   async function refreshPrayer() {
-    const today = zoneNow('Asia/Dubai').date;
-    if (news.prayer && news.prayer.days && news.prayer.days[today] && Date.now() - news.prayer.at < 12 * 3600000) return;
+    const today = zoneNow('Asia/Dubai').date, have = news.prayer && news.prayer.days;
+    const tmr = new Date(Date.parse(today + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+    if (have && have[today] && have[today].fajr && have[tmr] && Date.now() - news.prayer.at < 12 * 3600000) return;
+    const days = {};
+    const hm = (v, add) => { const [h, mm] = String(v || '').slice(0, 5).split(':').map(Number); const t = h * 60 + mm + (add || 0); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
     try {
-      const [y, m] = today.split('-');
-      const r = await fetch('https://api.aladhan.com/v1/calendarByCity/' + y + '/' + Number(m) + '?city=Dubai&country=AE&method=16', { cache: 'no-store' });
-      const j = r.ok ? await r.json() : null, days = {};
-      const hm = (v, add) => { const [h, mm] = String(v || '').slice(0, 5).split(':').map(Number); const t = h * 60 + mm + (add || 0); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
-      for (const d of (j && j.data) || []) {
-        const g = String(d.date && d.date.gregorian && d.date.gregorian.date || '').split('-'); if (g.length !== 3) continue;
-        days[g[2] + '-' + g[1] + '-' + g[0]] = { asr: hm(d.timings.Asr), maghrib: hm(d.timings.Maghrib, 1), isha: hm(d.timings.Isha) };
+      for (const ymd of [today, tmr]) {
+        const [y, m] = ymd.split('-'); if (Object.keys(days).some(k => k.startsWith(y + '-' + m))) continue;
+        const r = await fetch('https://api.aladhan.com/v1/calendarByCity/' + y + '/' + Number(m) + '?city=Dubai&country=AE&method=16', { cache: 'no-store' });
+        const j = r.ok ? await r.json() : null;
+        for (const d of (j && j.data) || []) {
+          const g = String(d.date && d.date.gregorian && d.date.gregorian.date || '').split('-'); if (g.length !== 3) continue;
+          const t = d.timings;
+          days[g[2] + '-' + g[1] + '-' + g[0]] = { fajr: hm(t.Fajr), sunrise: hm(t.Sunrise, -4), dhuhr: hm(t.Dhuhr), asr: hm(t.Asr), maghrib: hm(t.Maghrib, 1), isha: hm(t.Isha) };
+        }
       }
-      news.prayer = Object.keys(days).length ? { at: Date.now(), days } : Object.assign({}, news.prayer, { err: true });
+      news.prayer = days[today] ? { at: Date.now(), days } : Object.assign({}, news.prayer, { err: true });
     } catch (e) { news.prayer = Object.assign({}, news.prayer, { err: true }); }
   }
 
@@ -583,14 +616,14 @@
     const c = sideCfg(); let first = true;
     return c.order.filter(v => !c.off.has(v)).map(v => {
       let h = v === 'weather' ? weatherHtml(c) : v === 'clocks' ? clocksHtml() : v === 'stocks' ? stocksHtml(c) : v === 'prayer' ? prayerHtml()
-        : v === 'news' ? head('Top stories', refreshBtn()) + newsList(news.stories, 5) : head('Dubai') + newsList(news.dubai, 3);
+        : v === 'news' ? head('Top stories', refreshBtn()) + newsList(news.stories, c.nTop) : head('Dubai') + newsList(news.dubai, c.nDubai);
       h = '<div class="wbox' + (first ? ' first' : '') + '" data-w="' + v + '">' + h + '</div>'; first = false; return h;
     }).join('');
   }
   function drawNews() { const b = $('#newsBox'); if (b) { if (newsShown()) b.innerHTML = newsHtml(); else renderSide(); } else if (newsShown()) renderSide(); }
   async function refreshNews(force) {
     if (newsOff || newsBusy || !newsHost() || isPhone()) return;
-    const on0 = sideOn(), missing = news && ((on0.includes('weather') && !news.wx) || (on0.includes('prayer') && !news.prayer));
+    const on0 = sideOn(), c0 = sideCfg(), missing = news && ((on0.includes('weather') && (!news.wx || news.wx.for !== c0.wx.label)) || (on0.includes('prayer') && !(news.prayer && news.prayer.days && Object.values(news.prayer.days)[0] && Object.values(news.prayer.days)[0].fajr)));
     if (!force && !missing && news && news.v === 6 && Date.now() - news.at < NEWS_EVERY) return;
     newsBusy = true; if (news) drawNews();
     try {
@@ -605,14 +638,22 @@
   }
 
   // Settings → Sidebar boxes
+  const cityBox = (kind, ph) => '<div class="cityq"><input class="ctl" data-cityq="' + kind + '" placeholder="' + ph + '" autocomplete="off" aria-label="' + ph + '"><div class="cityres" id="cityRes-' + kind + '"></div></div>';
   function sideSheetHtml() {
     const c = sideCfg(), arrows = (attr, k, n, name) => '<button type="button" class="iconbtn" data-' + attr + '="' + k + ':-1"' + (k === 0 ? ' disabled' : '') + ' aria-label="Move ' + esc(name) + ' up">' + I.chev + '</button><button type="button" class="iconbtn down" data-' + attr + '="' + k + ':1"' + (k === n - 1 ? ' disabled' : '') + ' aria-label="Move ' + esc(name) + ' down">' + I.chev + '</button>';
-    return '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="sbTitle"><div class="sheet-head"><h2 id="sbTitle">Sidebar boxes</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
+    const num = (id, val, max) => '<select class="ctl sbnum" id="' + id + '">' + Array.from({ length: max }, (_, k) => '<option' + (k + 1 === val ? ' selected' : '') + '>' + (k + 1) + '</option>').join('') + '</select>';
+    const clocks = c.clocks.slice().sort((a, b) => tzOffset(a.tz) - tzOffset(b.tz));
+    return '<div class="sheet narrow sbsheet" role="dialog" aria-modal="true" aria-labelledby="sbTitle"><div class="sheet-head"><h2 id="sbTitle">Sidebar boxes</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
       '<div class="field"><span class="field-label">Show and order</span><p class="hint" style="margin:0 0 6px">Shown under Recently deleted on this computer. Untick a box to hide it.</p><div class="pglist">' +
       c.order.map((v, k) => '<div class="pgrow' + (c.off.has(v) ? ' off' : '') + '"><label class="chk"><input type="checkbox" data-sbon="' + v + '"' + (c.off.has(v) ? '' : ' checked') + '> ' + esc(SIDE_NAME[v]) + '</label><span class="spacer"></span>' + arrows('sbmove', k, c.order.length, SIDE_NAME[v]) + '</div>').join('') + '</div></div>' +
+      '<div class="field"><span class="field-label">Weather city</span><div class="pglist"><div class="pgrow"><b>' + esc(c.wx.label) + '</b></div></div>' + cityBox('wx', 'Change city: start typing, e.g. London') +
+      '<div class="seg" role="group" aria-label="Temperature" style="margin-top:8px">' + [['C', '°C'], ['F', '°F']].map(([k, n]) => '<button type="button" data-sbunit="' + k + '" aria-pressed="' + (c.unit === k) + '">' + n + '</button>').join('') + '</div></div>' +
+      '<div class="field"><span class="field-label">Clocks (up to 4, shown earliest to latest)</span><div class="pglist">' + (clocks.length ? clocks.map(k => '<div class="pgrow"><b>' + esc(k.name) + '</b><span class="hint" style="margin:0 0 0 8px">' + t12(zoneNow(k.tz).h + ':' + zoneNow(k.tz).m) + '</span><span class="spacer"></span><button type="button" class="iconbtn" data-clkdel="' + esc(k.tz + '|' + k.name) + '" aria-label="Remove ' + esc(k.name) + '">' + I.x + '</button></div>').join('') : '<p class="hint" style="margin:4px 0">No clocks yet.</p>') + '</div>' +
+      (c.clocks.length < 4 ? cityBox('clk', 'Add a city: start typing, e.g. London') : '') + '</div>' +
       '<div class="field"><span class="field-label">Stocks</span><div class="pglist">' + (c.syms.length ? c.syms.map((s, k) => '<div class="pgrow"><b>' + esc(s) + '</b><span class="spacer"></span>' + arrows('stmove', k, c.syms.length, s) + '<button type="button" class="iconbtn" data-stdel="' + k + '" aria-label="Remove ' + esc(s) + '">' + I.x + '</button></div>').join('') : '<p class="hint" style="margin:4px 0">No stocks yet.</p>') + '</div>' +
       '<form class="stock-form" id="stockAdd" style="margin-top:8px"><input id="stockSym" class="ctl" placeholder="Add a symbol, e.g. AAPL" autocomplete="off" aria-label="Stock symbol"><button type="submit" class="chipbtn">Add</button></form></div>' +
-      '<div class="field"><span class="field-label">Temperature</span><div class="seg" role="group" aria-label="Temperature">' + [['C', '°C'], ['F', '°F']].map(([k, n]) => '<button type="button" data-sbunit="' + k + '" aria-pressed="' + (c.unit === k) + '">' + n + '</button>').join('') + '</div></div>' +
+      '<div class="field"><span class="field-label">Prayer times to show</span><div class="praychk">' + PRAYERS.map(([k, n]) => '<label class="chk"><input type="checkbox" data-sbpray="' + k + '"' + (c.prayers.includes(k) ? ' checked' : '') + '> ' + n + '</label>').join('') + '</div></div>' +
+      '<div class="field"><span class="field-label">How many stories</span><div class="sbnums"><label>Top stories ' + num('sbTop', c.nTop, 15) + '</label><label>Dubai ' + num('sbDubai', c.nDubai, 10) + '</label></div></div>' +
       (lsGet(HIDE_KEY, []).length ? '<button type="button" class="linkbtn" data-sbunhide="1">Show the ' + lsGet(HIDE_KEY, []).length + ' hidden news stories again</button>' : '') +
       '<p class="hint">These settings are just for this computer.</p></div></div>';
   }
@@ -628,9 +669,38 @@
       const tm = e.target.closest('[data-stmove]'); if (tm) { const [k, d] = tm.dataset.stmove.split(':').map(Number); if (move(c.syms, k, d)) redraw(c); return; }
       const sd = e.target.closest('[data-stdel]'); if (sd) { c.syms.splice(Number(sd.dataset.stdel), 1); redraw(c); return; }
       const su = e.target.closest('[data-sbunit]'); if (su) { c.unit = su.dataset.sbunit; redraw(c); return; }
-      if (e.target.closest('[data-sbunhide]')) { lsSet(HIDE_KEY, []); redraw(); }
+      if (e.target.closest('[data-sbunhide]')) { lsSet(HIDE_KEY, []); redraw(); return; }
+      const cd = e.target.closest('[data-clkdel]'); if (cd) { const [tz, name] = cd.dataset.clkdel.split('|'); c.clocks = c.clocks.filter(k => !(k.tz === tz && k.name === name)); redraw(c); return; }
+      const cp = e.target.closest('[data-citypick]'); if (cp) { const [kind, k] = cp.dataset.citypick.split(':'); pickCity(c, kind, (cityRes[kind] || [])[Number(k)]); }
     });
-    el.addEventListener('change', e => { if (!e.target.dataset.sbon) return; const c = sideCfg(); e.target.checked ? c.off.delete(e.target.dataset.sbon) : c.off.add(e.target.dataset.sbon); redraw(c); });
+    const pickCity = (c, kind, r) => {
+      if (!r) return;
+      if (kind === 'wx') c.wx = { name: r.name, label: r.label, lat: r.lat, lon: r.lon };
+      else if (!c.clocks.some(k => k.tz === r.tz && k.name === r.name)) c.clocks = c.clocks.concat([{ name: r.name, tz: r.tz }]).slice(0, 4);
+      cityRes = {}; redraw(c);
+      const q = el.querySelector('[data-cityq="' + kind + '"]'); if (q) q.focus();
+    };
+    el.addEventListener('input', e => {
+      const kind = e.target.dataset && e.target.dataset.cityq; if (!kind) return;
+      clearTimeout(cityTimer); const q = e.target.value;
+      cityTimer = setTimeout(async () => {
+        const list = await searchCities(q); cityRes[kind] = list;
+        const box = $('#cityRes-' + kind); if (!box) return;
+        box.innerHTML = list.map((r, k) => '<button type="button" data-citypick="' + kind + ':' + k + '">' + esc(r.label) + (kind === 'clk' ? '<small>' + t12(zoneNow(r.tz).h + ':' + zoneNow(r.tz).m) + '</small>' : '') + '</button>').join('') || (q.trim().length >= 2 ? '<div class="hint" style="padding:6px 10px">No matches</div>' : '');
+      }, 250);
+    });
+    el.addEventListener('keydown', e => {
+      const kind = e.target.dataset && e.target.dataset.cityq; if (!kind || e.key !== 'Enter') return;
+      e.preventDefault(); pickCity(sideCfg(), kind, (cityRes[kind] || [])[0]);
+    });
+    el.addEventListener('change', e => {
+      if (!$('#sbTitle')) return;
+      const c = sideCfg(), t = e.target;
+      if (t.dataset.sbon) { t.checked ? c.off.delete(t.dataset.sbon) : c.off.add(t.dataset.sbon); redraw(c); }
+      if (t.dataset.sbpray) { const set = new Set(c.prayers); t.checked ? set.add(t.dataset.sbpray) : set.delete(t.dataset.sbpray); c.prayers = PRAYERS.map(p => p[0]).filter(k => set.has(k)); redraw(c); }
+      if (t.id === 'sbTop') { c.nTop = Number(t.value); redraw(c); }
+      if (t.id === 'sbDubai') { c.nDubai = Number(t.value); redraw(c); }
+    });
     el.addEventListener('submit', e => {
       if (e.target.id !== 'stockAdd') return; e.preventDefault();
       const c = sideCfg(), add = ($('#stockSym').value || '').toUpperCase().split(/[\s,;]+/).filter(x => /^[A-Z0-9.^=-]{1,12}$/.test(x) && !c.syms.includes(x));
@@ -2847,7 +2917,7 @@
     const ns = all.filter(n => !!n.archived === arch).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.editedAt || b.createdAt) - (a.editedAt || a.createdAt));
     const nArch = all.filter(n => n.archived).length;
     let html = noteTabs();
-    if (!arch) html += '<div class="ncapture"><input id="nNew" placeholder="Take a note… (Enter to save)" autocomplete="off" aria-label="Take a note"><button type="button" class="iconbtn" data-nnew="list" title="New checklist" aria-label="New checklist">' + I.steps + '</button><button type="button" class="iconbtn" data-nnew="files" title="New note with photos or PDFs" aria-label="New note with photos or PDFs">' + I.image + '</button></div>' +
+    if (!arch) html += '<div class="ncapture"><input id="nNew" placeholder="Take a note… (Enter saves it as the title)" autocomplete="off" aria-label="Take a note"><button type="button" class="iconbtn" data-nnew="list" title="New checklist" aria-label="New checklist">' + I.steps + '</button><button type="button" class="iconbtn" data-nnew="files" title="New note with photos or PDFs" aria-label="New note with photos or PDFs">' + I.image + '</button></div>' +
       '<p class="hint ndrophint">Drop photos or PDFs anywhere here to make a note, or onto a note to add them.</p>';
     html += syncHint();
     const pinned = ns.filter(n => n.pinned), rest = ns.filter(n => !n.pinned);
@@ -3129,7 +3199,7 @@
     const selRaw = () => { const t = ui.selected && taskById(ui.selected); return t || null; };
     content.addEventListener('keydown', e => {
       if (e.target.id === 'nNew' && e.key === 'Enter' && e.target.value.trim()) {
-        const v = e.target.value.trim(); snapshot(); newNote({ body: v }); save(); e.target.value = ''; renderMain(); $('#nNew').focus(); toast('Note saved', true);
+        const v = e.target.value.trim(); snapshot(); newNote({ title: v }); save(); e.target.value = ''; renderMain(); $('#nNew').focus(); toast('Note saved', true);
       }
       if (e.target.id === 'dNew' && e.key === 'Enter' && e.target.value.trim()) {
         const v = e.target.value.trim(); snapshot(); const d = newDoc({ title: v }); save(); e.target.value = ''; openNote(d.id); toast('Now add a photo or PDF of it', true);
