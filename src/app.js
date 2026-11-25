@@ -809,6 +809,7 @@
     if (t.myDay === todayISO() && ui.view !== 'myday') meta.push('<span class="myday">' + I.sun + 'My Day</span>');
     if (t.steps.length) meta.push('<button type="button" class="stepfold' + (t.fold ? '' : ' open') + '" data-stepfold="' + t.id + '" title="' + (t.fold ? 'Show steps' : 'Hide steps') + '">' + I.steps + t.steps.filter(s => s.done).length + ' of ' + t.steps.length + I.chev + '</button>');
     if ((t.attachments || []).length) meta.push('<span>' + I.clip + t.attachments.length + '</span>');
+    if (t.expFor) { const src = taskById(t.expFor); if (src && isPaper(src)) meta.push('<span class="jfrom" data-expdoc="' + src.id + '" title="Open ' + esc(noteTitle(src)) + '">' + I.idcard + (isDoc(src) ? 'Document' : 'Note') + '</span>'); }
     if (t.jFrom) { const src = taskById(t.jFrom); if (src && isNote(src)) meta.push('<span class="jfrom" data-jopen="' + src.due + '" title="Open in the journal">' + I.journal + 'Journal</span>'); else if (src && isPage(src)) meta.push('<span class="jfrom" data-jlink="' + esc(src.title) + '" title="Open the page">' + I.journal + esc(src.title) + '</span>'); }
     if (t.notes) meta.push('<span>' + I.note + 'Note</span>');
     if (opts.showList && l && S.lists.length > 1) meta.push('<span><span class="dot" style="background:' + l.color + ';margin:0;width:8px;height:8px"></span>' + esc(l.name) + '</span>');
@@ -1173,6 +1174,7 @@
     })();
     el.innerHTML = '<div class="d-scroll">' +
       '<div class="d-title"><button type="button" class="check" data-dact="toggle" aria-label="Complete">' + I.check + '</button><textarea id="dTitle" rows="1" aria-label="Task title">' + esc(t.title) + '</textarea><button type="button" class="iconbtn" data-dact="close" aria-label="Close details">' + I.x + '</button></div>' +
+      (t.expFor && taskById(t.expFor) && isPaper(taskById(t.expFor)) ? '<button type="button" class="toggle-row" data-expdoc="' + t.expFor + '">' + I.idcard + 'Open ' + (isDoc(taskById(t.expFor)) ? 'document' : 'note') + ': ' + esc(trunc(noteTitle(taskById(t.expFor)), 40)) + '</button>' : '') +
       '<div class="card steps">' + t.steps.map(s => '<div class="step' + (s.done ? ' done' : '') + '" data-step="' + s.id + '"><button type="button" class="check" data-sact="toggle" aria-label="Complete step">' + I.check + '</button><span>' + esc(s.title) + '</span><button type="button" class="iconbtn" data-sact="del" aria-label="Delete step">' + I.x + '</button></div>').join('') +
       '<input id="dStep" placeholder="+ Add step" aria-label="Add step"></div>' +
       '<button type="button" class="toggle-row' + (t.myDay === T ? ' on' : '') + '" data-dact="myday">' + I.sun + (t.myDay === T ? 'Added to My Day' : 'Add to My Day') + '</button>' +
@@ -2734,7 +2736,7 @@
   // ---- expiry dates (documents and notes): one task "<name> expires" on the date, with a heads-up some time before
   // Whose and which: "Sam's passport", "car registration"
   // A name goes in front only when Tally named the document itself ("Aidan's Passport"); a title you wrote is used as is
-  function docName(item) { const v = E(item), t = noteTitle(item), h = (v.holder || '').trim(), yours = v.title && !v.titleAuto && !KIND_NAMES.includes(v.title); return h && !yours && !t.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + t : t; }
+  function docName(item) { const v = E(item), t = noteTitle(item), h = (v.holder || '').trim(), yours = v.title && !v.titleAuto && !KIND_NAMES.includes(v.title); return h && !yours && !isMe(h) && !t.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + t : t; }
   // Linked task: once ticked off or deleted it stays that way, until the expiry date changes
   function linked(id, forDate, curFor) {
     if (!id) return { t: null, keep: false };
@@ -2917,7 +2919,7 @@
     // one document in a note you titled: your title; several: what each one is (Visa, Emirates ID…)
     const many = (note.expDocs || []).filter(x => !x.no).length > 1, own = E(note).title;
     const base = (!many && own) ? own : (e.title || noteTitle(note)), h = (!many && own) ? '' : (e.holder || '').trim();
-    return h && !base.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + base : base;
+    return h && !isMe(h) && !base.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + base : base;
   }
   function placeDocTask(note, e, dup) {
     const cur = e.taskId && taskById(e.taskId), live = cur && !cur.done ? cur : null;
@@ -3357,6 +3359,7 @@
       const sf = e.target.closest('[data-stepfold]');
       if (sf) { e.stopPropagation(); const t = taskById(sf.dataset.stepfold); if (t) { t.fold = !t.fold; save(); renderMain(); } }
     }, true);
+    document.addEventListener('click', e => { const xd = e.target.closest && e.target.closest('[data-expdoc]'); if (xd) { e.stopPropagation(); e.preventDefault(); ui.selected = xd.dataset.expdoc; ui.dayPanel = null; render(); } }, true);
     content.addEventListener('click', e => {
       const oi = e.target.closest('[data-openitem]'); if (oi) { ui.selected = oi.dataset.openitem; ui.dayPanel = null; render(); return; }
       if (e.target.closest('[data-vunlock]')) { needVault(); return; }
@@ -4273,6 +4276,7 @@
       if (t.expFor && t.notes && /^Expiry date of /.test(t.notes)) { t.notes = ''; ch++; }
       if (isPaper(t) && (t.renew || t.reminder)) { if (t.renew && t.lead === undefined) t.lead = t.renew.days; delete t.renew; delete t.reminder; delete t.remindedFor; if (t.expires) placeExpTask(t); ch++; }
       if (isPaper(t) && t.expires && expTask(t) && expTask(t).lead === undefined) { placeExpTask(t); ch++; }
+      if (isPaper(t) && t.expires && expTask(t) && expTask(t).title !== docName(t) + ' expires') { placeExpTask(t); ch++; } // names follow the current naming rules
     });
     if (ch) { save(); render(); }
     autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000);
