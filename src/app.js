@@ -2733,7 +2733,8 @@
 
   // ---- expiry dates (documents and notes): one task "<name> expires" on the date, with a heads-up some time before
   // Whose and which: "Sam's passport", "car registration"
-  function docName(item) { const v = E(item), t = noteTitle(item), h = (v.holder || '').trim(); return h && !t.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + t : t; }
+  // A name goes in front only when Tally named the document itself ("Aidan's Passport"); a title you wrote is used as is
+  function docName(item) { const v = E(item), t = noteTitle(item), h = (v.holder || '').trim(), yours = v.title && !v.titleAuto && !KIND_NAMES.includes(v.title); return h && !yours && !t.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + t : t; }
   // Linked task: once ticked off or deleted it stays that way, until the expiry date changes
   function linked(id, forDate, curFor) {
     if (!id) return { t: null, keep: false };
@@ -2915,7 +2916,7 @@
   function expDocName(note, e) {
     // one document in a note you titled: your title; several: what each one is (Visa, Emirates ID…)
     const many = (note.expDocs || []).filter(x => !x.no).length > 1, own = E(note).title;
-    const base = (!many && own) ? own : (e.title || noteTitle(note)), h = (e.holder || '').trim();
+    const base = (!many && own) ? own : (e.title || noteTitle(note)), h = (!many && own) ? '' : (e.holder || '').trim();
     return h && !base.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + base : base;
   }
   function placeDocTask(note, e, dup) {
