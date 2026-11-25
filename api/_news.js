@@ -54,4 +54,23 @@ function pickBreaking(lists, mins, max, now) {
   }
   return out;
 }
-module.exports = { parseNews, parseTrends, pickBreaking };
+// Sports and entertainment filter ("real news" only)
+const SOFT_SOURCES = /espn|sports|bleacher|the athletic|steelers|depot|\bnfl\b|\bnba\b|\bmlb\b|\bnhl\b|cbssports|si\.com|sporting news|on3|247sports|pro football|variety|hollywood|deadline|\bpeople\b|tmz|e! ?news|billboard|us weekly|entertainment|rolling stone|vulture|parade|just jared|page six|soap|gold derby|screen rant|collider|ign\b|gamespot|polygon|kotaku/i;
+const SOFT_WORDS = new RegExp('\\b(' + [
+  'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa', 'ufc', 'wwe', 'fifa', 'pga', 'nascar', 'f1', 'formula 1',
+  'football', 'basketball', 'baseball', 'soccer', 'hockey', 'golf', 'tennis', 'boxing', 'wrestling', 'cricket',
+  'quarterback', 'touchdown', 'playoffs?', 'depth chart', 'mock draft', 'super bowl', 'world series', 'stanley cup', 'march madness',
+  'coach', 'roster', 'rookie', 'injury report', 'hall of fame', 'heisman', 'week \\d+', 'game \\d', 'vs\\.?',
+  'steelers', 'cowboys', 'eagles', 'chiefs', 'packers', 'patriots', 'ravens', '49ers', 'bears', 'lions', 'bills', 'dolphins', 'broncos', 'raiders', 'chargers', 'seahawks', 'commanders', 'falcons', 'saints', 'buccaneers', 'vikings', 'bengals', 'browns', 'texans', 'colts', 'jaguars', 'titans', 'rams', 'steelers',
+  'lakers', 'celtics', 'knicks', 'warriors', 'bulls', 'nets', 'mavericks', 'nuggets', 'bucks', 'suns', 'clippers', 'spurs', '76ers', 'sixers', 'timberwolves', 'cavaliers', 'pistons', 'hawks', 'yankees', 'dodgers', 'mets', 'red sox', 'cubs', 'astros', 'braves',
+  'dancing with the stars', 'bachelor(ette)?', 'survivor', 'american idol', 'the voice', 'love island', 'big brother', 'reality (tv|show|star)',
+  'oscars?', 'grammys?', 'emmys?', 'golden globes?', 'box office', 'celebrit(y|ies)', 'kardashians?', 'taylor swift', 'miss (universe|international|america|world|usa)', 'beauty pageant',
+  'season \\d+', 'episode', 'finale', 'premiere', 'trailer', 'album', 'tour dates', 'concert', 'netflix', 'disney\\+', 'hbo', 'marvel', 'star wars', 'video game', 'playstation', 'xbox', 'nintendo',
+  'mega millions', 'powerball', 'lottery', 'horoscope', 'wordle', 'connections hint'
+].join('|') + ')\\b', 'i');
+function soft(x, softTitles) {
+  const text = [x.term, x.title].filter(Boolean).join(' ');
+  return SOFT_SOURCES.test(x.source || '') || SOFT_WORDS.test(text) || !!(softTitles && x.title && softTitles.has(key(x.title)));
+}
+function key(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 70); }
+module.exports = { parseNews, parseTrends, pickBreaking, soft, key };

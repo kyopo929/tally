@@ -468,9 +468,9 @@
     const items = tickItems(); if (!items.length) return '';
     const one = items.map(i => '<a class="tick-item" href="' + esc(i.url) + '" target="_blank" rel="noopener noreferrer"><span class="tick-tag ' + i.k + '">' + i.label + '</span>' + esc(i.text) + (i.sub ? '<span class="tick-sub">' + esc(i.sub) + '</span>' : '') + '</a>').join('');
     const sig = items.map(i => i.url).join('|'); if (sig !== tickSig) { tickSig = sig; tickT0 = Date.now(); }
-    // about 45 pixels a second; the start time keeps it moving smoothly when the sidebar redraws
+    // about 90 pixels a second; the start time keeps it moving smoothly when the sidebar redraws
     const chars = items.reduce((n, i) => n + i.label.length + i.text.length + (i.sub || '').length + 6, 0);
-    const dur = Math.max(20, Math.round(chars * 0.16)), off = ((Date.now() - tickT0) / 1000) % dur;
+    const dur = Math.max(10, Math.round(chars * 0.08)), off = ((Date.now() - tickT0) / 1000) % dur;
     return '<div class="ticker" title="Breaking and trending. Hover to pause."><span class="tick-live"><i></i>Live</span><div class="tick-win"><div class="tick-track" style="animation-duration:' + dur + 's;animation-delay:-' + off.toFixed(2) + 's">' + one + '<span class="tick-dup" aria-hidden="true">' + one.replace(/<a /g, '<a tabindex="-1" ') + '</span></div></div></div>';
   }
   function newsHtml() {
@@ -481,13 +481,13 @@
   function drawNews() { const b = $('#newsBox'); if (b) b.innerHTML = newsHtml(); else if (newsShown()) renderSide(); }
   async function refreshNews(force) {
     if (newsOff || newsBusy || !newsHost() || isPhone()) return;
-    if (!force && news && news.trending && Date.now() - news.at < NEWS_EVERY) return;
+    if (!force && news && news.v === 2 && Date.now() - news.at < NEWS_EVERY) return;
     newsBusy = true; if (news) drawNews();
     try {
       const r = await fetch('/api/news', { cache: 'no-store' });
       if (r.status === 404) { newsOff = true; news = null; try { localStorage.removeItem(NEWS_KEY); } catch (e) { } renderSide(); return; }
       const j = r.ok ? await r.json() : null;
-      if (j && ((j.stories || []).length || (j.breaking || []).length || (j.trending || []).length)) { news = { at: Date.now(), stories: j.stories || [], breaking: j.breaking || [], trending: j.trending || [] }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
+      if (j && ((j.stories || []).length || (j.breaking || []).length || (j.trending || []).length)) { news = { v: 2, at: Date.now(), stories: j.stories || [], breaking: j.breaking || [], trending: j.trending || [] }; try { localStorage.setItem(NEWS_KEY, JSON.stringify(news)); } catch (e) { } }
     } catch (e) { }
     newsBusy = false; if (news) drawNews();
   }

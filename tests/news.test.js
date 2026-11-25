@@ -25,4 +25,19 @@ t('trends', () => { assert.strictEqual(tr.length, 1); assert.deepStrictEqual(tr[
 const now = Date.parse('2026-11-25T04:00:00Z');
 const b = pickBreaking([[{ title: 'Old one', at: '2026-11-25T01:00:00Z' }, { title: 'Quake hits Japan', at: '2026-11-25T03:30:00Z' }], [{ title: 'BREAKING: Quake hits Japan', at: '2026-11-25T03:31:00Z' }, { title: 'Newest', at: '2026-11-25T03:50:00Z' }, { title: 'No date', at: null }]], 90, 6, now);
 t('breaking: recent, newest first, deduped, prefix dropped', () => assert.deepStrictEqual(b.map(x => x.title), ['Newest', 'Quake hits Japan']));
+const { soft, key } = require('../api/_news');
+t('soft: shows, teams, sports outlets', () => {
+  assert.ok(soft({ title: "'Dancing With the Stars' Season 35 Couples Perform Their Last Dances", source: 'USA Today' }));
+  assert.ok(soft({ term: 'aaron rodgers', title: 'Steelers bench Aaron Rodgers for Mason Rudolph', source: 'CBS' }));
+  assert.ok(soft({ term: 'drew allar', title: 'Some headline', source: 'Steelers Depot' }));
+  assert.ok(soft({ term: 'lakers vs suns', title: 'x', source: 'AP' }));
+  assert.ok(soft({ term: 'miss international 2026', title: 'Katrina Johnson says it is a dream', source: 'Rappler' }));
+  assert.ok(soft({ title: 'Some player story', source: 'AP' }, new Set([key('Some player story')])));
+});
+t('real news stays', () => {
+  for (const x of [{ title: 'US CIA, ODNI suffer cybersecurity breach of some unclassified information', source: 'Reuters' },
+    { title: 'Lead azide must be detonated in Iowa, Army says; some residents urged to evacuate', source: 'The Washington Post' },
+    { title: 'US court convicts Huawei for fraud', source: 'CNN' }, { term: 'costa rica', title: 'Rope bridges offer sloths a lifeline', source: 'AP' }])
+    assert.ok(!soft(x), x.title);
+});
 console.log('news: ' + n + ' passed');
