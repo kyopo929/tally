@@ -41,4 +41,15 @@ t('real news stays', () => {
     { title: 'US court convicts Huawei for fraud', source: 'CNN' }, { term: 'costa rica', title: 'Rope bridges offer sloths a lifeline', source: 'AP' }])
     assert.ok(!soft(x), x.title);
 });
+const { sameStory, notIn } = require('../api/_news');
+t('big moments pass', () => {
+  assert.ok(!soft({ title: 'Dodgers win World Series in Game 7 thriller', source: 'ESPN' }));
+  assert.ok(!soft({ title: 'Tom Cruise dies at 64', source: 'Variety' }));
+  assert.ok(soft({ title: 'Who won Dancing With the Stars? Season 35 winner crowned', source: 'USA Today' }));
+});
+t('same story across outlets', () => {
+  assert.ok(sameStory('Abrego Garcia Voluntarily Leaves U.S., Ending 20-Month Legal Fight', 'Abrego Garcia Will Voluntarily Leave U.S., Ending 20-Month Legal Ordeal'));
+  assert.ok(!sameStory('Asian Stocks to Slide as AI Trade Doubts Resurface', 'US court convicts Huawei for fraud'));
+  assert.strictEqual(notIn([{ title: "Shenzhou 24: Pakistan's first astronaut goes to space" }, { title: 'Other' }], [{ title: "Shenzhou 24: Pakistan's first astronaut goes to space aboard Chinese rocket" }], x => x.title).length, 1);
+});
 console.log('news: ' + n + ' passed');

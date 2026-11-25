@@ -68,9 +68,27 @@ const SOFT_WORDS = new RegExp('\\b(' + [
   'season \\d+', 'episode', 'finale', 'premiere', 'trailer', 'album', 'tour dates', 'concert', 'netflix', 'disney\\+', 'hbo', 'marvel', 'star wars', 'video games?', 'gaming', 'gamers?', 'playstation', 'xbox', 'nintendo', 'switch 2', 'steam', 'patch notes', 'mario( kart)?', 'pok[eé]mon', 'zelda', 'fortnite', 'minecraft', 'call of duty', 'gta',
   'mega millions', 'powerball', 'lottery', 'horoscope', 'wordle', 'connections hint'
 ].join('|') + ')\\b', 'i');
+// Big moments are still news: a major championship won, or a famous person's death
+const BIG_EVENT = /\b(world series|super bowl|stanley cup|nba (finals|championship)|world cup|olympics?|olympic gold|wimbledon|the masters|us open|champions league final)\b/i;
+const BIG_WIN = /\b(wins?|won|clinch(es|ed)?|champions?|crowned|title)\b/i;
+const DEATH = /\b(dies|died|dead at|death of|passes away|passed away|has died|killed|obituary)\b/i;
+function big(x) {
+  const t = [x.term, x.title].filter(Boolean).join(' ');
+  return DEATH.test(t) || (BIG_EVENT.test(t) && BIG_WIN.test(t));
+}
 function soft(x, softTitles) {
+  if (big(x)) return false;
   const text = [x.term, x.title, x.source].filter(Boolean).join(' ');
   return SOFT_SOURCES.test(x.source || '') || SOFT_WORDS.test(text) || !!(softTitles && x.title && softTitles.has(key(x.title)));
 }
 function key(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 70); }
-module.exports = { parseNews, parseTrends, pickBreaking, soft, key };
+// Same story? (different outlets word it differently, so compare the main words)
+const STOP = new Set('a an the of to in on for and or as at by with from is are was be will after over into says say new us u.s'.split(' '));
+function words(t) { return new Set(String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w)).map(w => w.replace(/(ing|ed|es|s)$/, ''))); }
+function sameStory(a, b) {
+  const A = words(a), B = words(b); if (!A.size || !B.size) return false;
+  let n = 0; for (const w of A) if (B.has(w)) n++;
+  return n >= 3 && n / Math.min(A.size, B.size) >= 0.5;
+}
+function notIn(items, stories, text) { return items.filter(x => !stories.some(s => sameStory(text(x), s.title))); }
+module.exports = { parseNews, parseTrends, pickBreaking, soft, key, big, sameStory, notIn };

@@ -3,11 +3,12 @@
 //   breaking: stories from the last 90 minutes (top stories + Google News U.S., World and Business sections)
 //   trending: Google Trends "Trending now" (US) with the top article for each search
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
-// outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`).
+// outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
+// except big moments: a major championship won or a famous person's death (`big`).
 // Only the original site serves it; copies of Tally get 404 and the sidebar box stays hidden.
 'use strict';
 const { isOriginal } = require('./_cfg');
-const { parseNews, parseTrends, pickBreaking, soft, key } = require('./_news');
+const { parseNews, parseTrends, pickBreaking, soft, key, notIn } = require('./_news');
 const G = 'hl=en-US&gl=US&ceid=US:en';
 const TOP = 'https://news.google.com/rss?' + G;
 const section = t => 'https://news.google.com/rss/headlines/section/topic/' + t + '?' + G;
@@ -28,8 +29,9 @@ module.exports = async function handler(req, res) {
   const real = arr => arr.filter(x => !soft(x, softTitles));
   const all = real(list(top, 40));
   const stories = all.slice(0, 8);
-  const breaking = pickBreaking([all, real(list(us)), real(list(world)), real(list(biz))], 90, 6);
-  const trending = trd.status === 'fulfilled' ? real(parseTrends(trd.value, 25)).slice(0, 8) : [];
+  // the ticker skips anything already in Top stories
+  const breaking = notIn(pickBreaking([all.slice(8), real(list(us)), real(list(world)), real(list(biz))], 90, 12), stories, x => x.title).slice(0, 6);
+  const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
   if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min
   res.statusCode = 200;
