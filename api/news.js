@@ -1,7 +1,7 @@
 // GET /api/news → for the sidebar on computers ("real news": no sports or entertainment):
 //   stories:  Google News "Top stories" (US edition)
 //   breaking: stories from the last 90 minutes (up to 4 hours when it's quiet) (top stories + Google News U.S., World and Business sections)
-//   dubai:    3 newest Dubai stories (Google News UAE edition, last day)
+//   dubai:    3 top Dubai stories (Google News UAE edition, last day; UAE newsrooms first, no press releases)
 //   trending: Google Trends "Trending now" (US), only searches whose story is also in a Google News news section
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
 // outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
@@ -39,7 +39,11 @@ module.exports = async function handler(req, res) {
   let breaking = latest(90); if (breaking.length < 4) breaking = latest(240); // quiet hours: reach back further
   const hard = all.concat(usL, worldL, bizL).map(x => x.title);
   const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)).filter(t => inNews(t, hard)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
-  const dubai = notIn(real(list(dxb, 40)).sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)), stories.concat(breaking), x => x.title)
+  // Google's own order (most relevant first), main UAE newsrooms first, no press releases
+  const UAE = /gulf news|khaleej times|the national|wam|emirates news agency|arabian business|gulf today|emirates 24|dubai media office|gulf business|al arabiya|reuters|bloomberg|ap news|bbc/i;
+  const PR = /zawya|pr newswire|business wire|globenewswire|press release|accesswire|einpresswire|openpr|newswire/i;
+  const dxbAll = real(list(dxb, 40)).filter(x => !PR.test(x.source || ''));
+  const dubai = notIn(dxbAll.filter(x => UAE.test(x.source || '')).concat(dxbAll.filter(x => !UAE.test(x.source || ''))), stories.concat(breaking), x => x.title)
     .filter((x, i, arr) => arr.findIndex(y => sameStory(y.title, x.title)) === i).slice(0, 3);
   if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min

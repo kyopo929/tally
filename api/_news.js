@@ -58,7 +58,7 @@ function pickBreaking(lists, mins, max, now) {
 const SOFT_SOURCES = /espn|sports|bleacher|the athletic|steelers|depot|\bnfl\b|\bnba\b|\bmlb\b|\bnhl\b|cbssports|si\.com|sporting news|on3|247sports|pro football|variety|hollywood|deadline|\bpeople\b|tmz|e! ?news|billboard|us weekly|entertainment|rolling stone|vulture|parade|just jared|page six|soap|gold derby|screen rant|collider|ign\b|gamespot|polygon|kotaku/i;
 const SOFT_WORDS = new RegExp('\\b(' + [
   'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa', 'ufc', 'wwe', 'fifa', 'pga', 'nascar', 'f1', 'formula 1',
-  'football', 'basketball', 'baseball', 'soccer', 'hockey', 'golf', 'tennis', 'boxing', 'wrestling', 'cricket',
+  'rugby', 'sevens', 'marathon', 'tournament', 'football', 'basketball', 'baseball', 'soccer', 'hockey', 'golf', 'tennis', 'boxing', 'wrestling', 'cricket',
   'quarterback', 'touchdown', 'playoffs?', 'depth chart', 'mock draft', 'super bowl', 'world series', 'stanley cup', 'march madness',
   'coach', 'roster', 'rookie', 'injury report', 'hall of fame', 'heisman', 'week \\d+', 'game \\d', 'vs\\.?',
   'steelers', 'cowboys', 'eagles', 'chiefs', 'packers', 'patriots', 'ravens', '49ers', 'bears', 'lions', 'bills', 'dolphins', 'broncos', 'raiders', 'chargers', 'seahawks', 'commanders', 'falcons', 'saints', 'buccaneers', 'vikings', 'bengals', 'browns', 'texans', 'colts', 'jaguars', 'titans', 'rams', 'steelers',
