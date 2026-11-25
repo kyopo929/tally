@@ -1,6 +1,6 @@
 // GET /api/news → for the sidebar on computers ("real news": no sports or entertainment):
 //   stories:  Google News "Top stories" (US edition)
-//   breaking: stories from the last 90 minutes (top stories + Google News U.S., World and Business sections)
+//   breaking: stories from the last 90 minutes (up to 4 hours when it's quiet) (top stories + Google News U.S., World and Business sections)
 //   trending: Google Trends "Trending now" (US), only searches whose story is also in a Google News news section
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
 // outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
@@ -32,7 +32,8 @@ module.exports = async function handler(req, res) {
   const stories = all.slice(0, 8);
   // the ticker skips anything already in Top stories
   const usL = real(list(us)), worldL = real(list(world)), bizL = real(list(biz));
-  const breaking = notIn(pickBreaking([all.slice(8), usL, worldL, bizL], 90, 12), stories, x => x.title).slice(0, 6);
+  const latest = mins => notIn(pickBreaking([all.slice(8), usL, worldL, bizL], mins, 12), stories, x => x.title).slice(0, 6);
+  let breaking = latest(90); if (breaking.length < 4) breaking = latest(240); // quiet hours: reach back further
   const hard = all.concat(usL, worldL, bizL).map(x => x.title);
   const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)).filter(t => inNews(t, hard)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
   if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }

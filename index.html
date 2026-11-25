@@ -1864,7 +1864,7 @@ button.ol-dot.folded { box-shadow: none; }
   // Moving ticker: breaking (last 90 min) first, then trending searches
   function tickItems() {
     if (!news) return [];
-    const fresh = (news.breaking || []).filter(b => b.at && Date.now() - Date.parse(b.at) < 3 * 3600000);
+    const fresh = (news.breaking || []).filter(b => b.at && Date.now() - Date.parse(b.at) < 5 * 3600000);
     return fresh.map(b => ({ k: 'brk', label: 'Breaking', text: b.title, sub: b.source, url: b.url }))
       .concat((news.trending || []).map(t => ({ k: 'trd', label: 'Trending', text: t.term + (t.title ? ': ' + t.title : ''), sub: t.traffic ? t.traffic + ' searches' : t.source, url: t.url })));
   }
