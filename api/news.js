@@ -1,21 +1,19 @@
 // GET /api/news → for the sidebar on computers ("real news": no sports or entertainment):
-//   stories:  Google News "Top stories" (US edition)
-//   breaking: stories from the last 90 minutes (up to 4 hours when it's quiet) (top stories + Google News U.S., World and Business sections)
-//   dubai:    3 top Dubai stories (Google News UAE edition, last day; UAE newsrooms first, no press releases)
-//   trending: Google Trends "Trending now" (US), only searches whose story is also in a Google News news section
+//   stories: Google News "Top stories" (US edition), top 5
+//   dubai:   3 top Dubai stories (Google News UAE edition, last day; UAE newsrooms first, no press releases)
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
 // outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
 // except big moments: a major championship won or a famous person's death (`big`).
 // Only the original site serves it; copies of Tally get 404 and the sidebar box stays hidden.
 'use strict';
 const { isOriginal } = require('./_cfg');
-const { parseNews, parseTrends, pickBreaking, soft, key, notIn, inNews, sameStory } = require('./_news');
+const { parseNews, soft, key, notIn, sameStory } = require('./_news');
 const G = 'hl=en-US&gl=US&ceid=US:en';
 const TOP = 'https://news.google.com/rss?' + G;
 const section = t => 'https://news.google.com/rss/headlines/section/topic/' + t + '?' + G;
-// Dubai: Google News UAE edition, stories about Dubai from the last day
 const DUBAI = 'https://news.google.com/rss/search?q=' + encodeURIComponent('Dubai when:1d') + '&hl=en-AE&gl=AE&ceid=AE:en';
-const TRENDS = 'https://trends.google.com/trending/rss?geo=US';
+const UAE = /gulf news|khaleej times|the national|wam|emirates news agency|arabian business|gulf today|emirates 24|dubai media office|gulf business|al arabiya|reuters|bloomberg|ap news|bbc/i;
+const PR = /zawya|pr newswire|business wire|globenewswire|press release|accesswire|einpresswire|openpr|newswire/i;
 
 async function get(url) {
   const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Tally)' } });
@@ -25,28 +23,17 @@ async function get(url) {
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (!isOriginal(req)) { res.statusCode = 404; return res.end(JSON.stringify({ error: 'Not available' })); }
-  const urls = [TOP, section('NATION'), section('WORLD'), section('BUSINESS'), section('SPORTS'), section('ENTERTAINMENT'), TRENDS, DUBAI];
-  const [top, us, world, biz, sports, ent, trd, dxb] = await Promise.allSettled(urls.map(get));
+  const [top, sports, ent, dxb] = await Promise.allSettled([TOP, section('SPORTS'), section('ENTERTAINMENT'), DUBAI].map(get));
   const list = (r, n) => r.status === 'fulfilled' ? parseNews(r.value, n || 40) : [];
   const softList = list(sports, 80).concat(list(ent, 80)).map(s => s.title);
   const softTitles = new Set(softList.map(key)); softTitles.list = softList;
   const real = arr => arr.filter(x => !soft(x, softTitles));
-  const all = real(list(top, 40));
-  const stories = all.slice(0, 8);
-  // the ticker skips anything already in Top stories
-  const usL = real(list(us)), worldL = real(list(world)), bizL = real(list(biz));
-  const latest = mins => notIn(pickBreaking([all.slice(8), usL, worldL, bizL], mins, 12), stories, x => x.title).slice(0, 6);
-  let breaking = latest(90); if (breaking.length < 4) breaking = latest(240); // quiet hours: reach back further
-  const hard = all.concat(usL, worldL, bizL).map(x => x.title);
-  const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)).filter(t => inNews(t, hard)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
-  // Google's own order (most relevant first), main UAE newsrooms first, no press releases
-  const UAE = /gulf news|khaleej times|the national|wam|emirates news agency|arabian business|gulf today|emirates 24|dubai media office|gulf business|al arabiya|reuters|bloomberg|ap news|bbc/i;
-  const PR = /zawya|pr newswire|business wire|globenewswire|press release|accesswire|einpresswire|openpr|newswire/i;
+  const stories = real(list(top, 40)).slice(0, 5);
   const dxbAll = real(list(dxb, 40)).filter(x => !PR.test(x.source || ''));
-  const dubai = notIn(dxbAll.filter(x => UAE.test(x.source || '')).concat(dxbAll.filter(x => !UAE.test(x.source || ''))), stories.concat(breaking), x => x.title)
+  const dubai = notIn(dxbAll.filter(x => UAE.test(x.source || '')).concat(dxbAll.filter(x => !UAE.test(x.source || ''))), stories, x => x.title)
     .filter((x, i, arr) => arr.findIndex(y => sameStory(y.title, x.title)) === i).slice(0, 3);
-  if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
+  if (!stories.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min
   res.statusCode = 200;
-  res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), stories, breaking, trending, dubai }));
+  res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), stories, dubai }));
 };
