@@ -5262,10 +5262,12 @@ button.ol-dot.folded { box-shadow: none; }
     const pages = S.tasks.filter(t => isPage(t) && t !== pg && hits(t.notes));
     const papers = S.tasks.filter(t => isPaper(t) && !shut(t) && (noteTitle(t).toLowerCase() === low || hits(paperText(t))));
     const tasks = S.tasks.filter(t => !t.type && !t.jFrom && !owe.includes(t) && (hits(t.title) || hits(t.notes)));
+    const evs = S.tasks.filter(t => isEvent(t) && !t.holiday && (hits(t.title) || hits(t.notes))).sort((a, b) => (a.due || '').localeCompare(b.due || ''));
     if (pages.length) body += '<div class="section"><div class="section-head">Pages <span class="n">' + pages.length + '</span></div><div class="tasks">' + pages.map(pageRow).join('') + '</div></div>';
     if (papers.length) body += '<div class="section"><div class="section-head">Notes <span class="n">' + papers.length + '</span></div><div class="tasks">' + papers.map(noteRowForSearch).join('') + '</div></div>';
+    if (evs.length) body += section('Events', evs, {});
     if (tasks.length) body += section('Tasks', tasks, { showList: true });
-    count += pages.length + papers.length + tasks.length;
+    count += pages.length + papers.length + tasks.length + evs.length;
     html += count ? '<div class="nlabel jmentions">Mentions</div>' + body : '<p class="hint jnone">No mentions yet. Write [[' + esc(name) + ']] in the journal, a note or a task and it shows up here.</p>';
     return { title: name, sub: meets.length ? meets.length + ' meeting' + (meets.length === 1 ? '' : 's') : count + ' mention' + (count === 1 ? '' : 's'), html, actions: '<button type="button" class="chipbtn" data-jauto="' + esc(name) + '" title="When on, “' + esc(name) + '” written anywhere shows as a link without [[ ]]">Auto-link: ' + (pg && pg.noAuto ? 'off' : 'on') + '</button>' + '<button type="button" class="chipbtn" data-jback="1">' + I.left + 'Journal</button>' };
   }
@@ -5459,7 +5461,8 @@ button.ol-dot.folded { box-shadow: none; }
     let el = $('#jump');
     if (!el) { el = document.createElement('div'); el.id = 'jump'; el.className = 'sheet-bg'; document.body.appendChild(el); }
     el.innerHTML = '<div class="jumpbox" role="dialog" aria-label="Jump to"><input id="jumpIn" class="ctl" placeholder="Jump to a day, person, note, document or task…" autocomplete="off"><div id="jumpList" class="jumplist"></div><div class="jsug-hint">↑↓ to choose, Enter to open, Esc to close</div></div>';
-    el.hidden = false; ui.jump = { sel: -1, items: [] }; drawJump(''); // nothing picked until you type or use the arrows setTimeout(() => $('#jumpIn').focus(), 20);
+    el.hidden = false; ui.jump = { sel: -1, items: [] }; drawJump(''); // nothing picked until you type or use the arrows
+    setTimeout(() => $('#jumpIn').focus(), 20);
   }
   function closeJump() { const el = $('#jump'); if (el) el.hidden = true; ui.jump = null; }
   function jumpItems(q) {
