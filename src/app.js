@@ -400,9 +400,26 @@
     t.skips = (t.skips || []).concat([{ at: Date.now(), due: was }]).slice(-60);
     save(); render(); toast('Skipped. Next one: ' + D.dueLabel(next) + (t.time ? ' ' + D.fmtTime(t.time) : ''), true);
   }
+  // A short, bright two-note "ding" when a task is done (made by the app itself, no sound file). Settings can turn it off.
+  let doneCtx = null;
+  function playDone() {
+    if (S.settings.doneSound === false) return;
+    try {
+      doneCtx = doneCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (doneCtx.state === 'suspended') doneCtx.resume();
+      const t0 = doneCtx.currentTime, out = doneCtx.createGain(); out.gain.value = 0.22; out.connect(doneCtx.destination);
+      [[1046.5, 0, 0.16], [1568, 0.075, 0.34]].forEach(([f, at, len]) => { // C6 then G6
+        const o = doneCtx.createOscillator(), g = doneCtx.createGain(), o2 = doneCtx.createOscillator(), g2 = doneCtx.createGain();
+        o.type = 'sine'; o.frequency.value = f; o2.type = 'sine'; o2.frequency.value = f * 2; g2.gain.value = 0.18;
+        g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(1, t0 + at + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+        o.connect(g); o2.connect(g2); g2.connect(g); g.connect(out); o.start(t0 + at); o2.start(t0 + at); o.stop(t0 + at + len + 0.02); o2.stop(t0 + at + len + 0.02);
+      });
+    } catch (e) { }
+  }
   function completeTask(t) {
     if (t.type) return;
     snapshot();
+    if (!t.done) playDone();
     if (t.done) { t.done = false; t.doneAt = null; save(); render(); toast('Marked as not done'); return; }
     if (t.recur) {
       const next = finishTask(t);
@@ -1429,6 +1446,7 @@
         '<div class="mlabel">Reminders</div><button type="button" data-mact="autorem">' + I.bell + (S.settings.autoRemind ? 'On: remind at a task’s due time' : 'Off: only remind when I set one') + '</button>' +
         '<button type="button" data-mact="bdayrem">' + I.bell + (S.settings.bdayRemind === false ? 'Birthdays & anniversaries: no automatic reminder' : 'Birthdays & anniversaries: remind the day before, 9am') + '</button>' +
         '<button type="button" data-mact="notif">' + I.bell + esc(notifStatus()) + '</button>' +
+        '<button type="button" data-mact="donesound">' + I.check + (S.settings.doneSound === false ? 'Sound when a task is done: off' : 'Sound when a task is done: on') + '</button>' +
         '<div class="mlabel">Your data</div>' + (syncAvailable() ? (sync.user ? '<button type="button" data-mact="signout">' + I.x + 'Sign out of sync (' + esc(sync.user.email || '') + ')</button>' : '<button type="button" data-mact="signin">' + I.repeat + 'Turn on sync\u2026</button>') : '') +
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
         (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
@@ -1600,7 +1618,7 @@
   function multiAction(k, val) {
     const ts = [...ui.multi].map(taskById).filter(Boolean); if (!ts.length) return;
     snapshot(); const n = ts.length;
-    if (k === 'complete') ts.forEach(t => { if (!t.done && !t.type) finishTask(t); });
+    if (k === 'complete') { if (ts.some(t => !t.done && !t.type)) playDone(); ts.forEach(t => { if (!t.done && !t.type) finishTask(t); }); }
     if (['today', 'tomorrow', 'nextweek'].includes(k)) ts.forEach(t => t.due = quickDate(k));
     if (k === 'nodate') ts.forEach(t => { t.due = null; t.time = null; t.recur = null; });
     if (k === 'myday') ts.forEach(t => t.myDay = todayISO());
@@ -1729,6 +1747,7 @@
       const hc = e.target.closest('[data-holc]'); if (hc) { const h = holSettings(); h[hc.dataset.holc] = !h[hc.dataset.holc]; S.settings.hol = h; delete S.settings.holidays; save(); renderMenu(); renderMain(); if (h[hc.dataset.holc]) refreshHolidays(true); return; }
       const tcb = e.target.closest('[data-tcolor]'); if (tcb) { const [k, cn] = tcb.dataset.tcolor.split(':'); S.settings.typeColors = Object.assign({}, S.settings.typeColors, { [k]: cn }); save(); applyTypeColors(); renderMenu(); renderMain(); return; }
       if (ma && ma.dataset.mact === 'bdayrem') { S.settings.bdayRemind = S.settings.bdayRemind === false ? true : false; save(); renderMenu(); pushRefresh(false); return; }
+      if (ma && ma.dataset.mact === 'donesound') { S.settings.doneSound = S.settings.doneSound === false; save(); renderMenu(); if (S.settings.doneSound) playDone(); return; }
       if (ma && ma.dataset.mact === 'autorem') { S.settings.autoRemind = !S.settings.autoRemind; save(); renderMenu(); pushRefresh(false); return; }
       if (ma && ma.dataset.mact === 'notif') { askNotif(); return; }
       if (ma && ma.dataset.mact === 'signin') { ui.menu = null; renderMenu(); openSignIn(); return; }
@@ -3959,8 +3978,8 @@
       if (tk) {
         e.stopPropagation();
         const ol = tk.closest('.ol'), n = taskById(ol.dataset.olid), i = Number(tk.dataset.jtick);
-        if (ol.classList.contains('ro')) { if (!n) return; const ls = parseOutline(n.notes), t = linkedTask(n, ls[i]); ls[i].done = !(t ? t.done : ls[i].done); n.notes = serializeOutline(ls); commitTasks(n); save(); render(); }
-        else { const lines = olRead(ol); lines[i].done = !lines[i].done; olRedraw(ol, lines, i); }
+        if (ol.classList.contains('ro')) { if (!n) return; const ls = parseOutline(n.notes), t = linkedTask(n, ls[i]); ls[i].done = !(t ? t.done : ls[i].done); if (ls[i].done) playDone(); n.notes = serializeOutline(ls); commitTasks(n); save(); render(); }
+        else { const lines = olRead(ol); lines[i].done = !lines[i].done; if (lines[i].done) playDone(); olRedraw(ol, lines, i); }
         return;
       }
       const fo = e.target.closest('[data-olfold]');
