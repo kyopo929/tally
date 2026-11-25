@@ -152,7 +152,8 @@
     } catch (e) { }
     return seed();
   }
-  function persistLocal() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
+  let dataVer = 0; // bumped on every save, so caches built from the data know when to rebuild
+  function persistLocal() { dataVer++; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
   function save() { persistLocal(); schedulePush(); if (vault.key) reseal(); }
   function snapshot() { ui.undo = JSON.stringify(S); }
 
@@ -3565,7 +3566,37 @@
   const pageFor = name => S.tasks.find(t => isPage(t) && t.title.toLowerCase() === name.trim().toLowerCase());
   const LINK_RE = /\[\[([^\[\]\n]{1,60})\]\]/g;
   const linksIn = text => [...new Set([...(text || '').matchAll(LINK_RE)].map(m => m[1].trim()).filter(Boolean))];
-  const linkify = s => esc(s).replace(/\[\[([^\[\]\n]{1,60})\]\]/g, (m, x) => '<button type="button" class="jlink" data-jlink="' + x.trim() + '">' + x.trim() + '</button>');
+  const jlinkBtn = x => '<button type="button" class="jlink" data-jlink="' + esc(x) + '">' + esc(x) + '</button>';
+  // Auto-links: a name you've put in [[ ]] once (or that has a page) shows as a link wherever it's written later.
+  // Only capitalized whole words ("Will", never "will"); a lone first name is skipped when two linked names share it
+  // ("Tim" when there's [[Tim Khan]] and [[Tim Ross]]); each page can turn it off (page.noAuto).
+  let autoCache = { ver: -1, re: null, names: null };
+  function autoLinkRe() {
+    if (autoCache.ver === dataVer && autoCache.names) return autoCache.re;
+    const seen = new Map(), off = new Set();
+    const add = x => { x = (x || '').trim(); if (x && x.length >= 2 && /^[A-Z0-9]/.test(x) && /[A-Za-z]/.test(x) && !seen.has(x.toLowerCase())) seen.set(x.toLowerCase(), x); };
+    S.tasks.forEach(t => {
+      if (isPage(t)) { if (t.noAuto) off.add(t.title.trim().toLowerCase()); else add(t.title); }
+      [t.title, t.notes, t.meet, isPaper(t) && !shut(t) ? E(t).body : ''].forEach(v => { if (v && v.includes('[[')) linksIn(v).forEach(add); });
+    });
+    let names = [...seen.values()].filter(x => !off.has(x.toLowerCase()));
+    names = names.filter(x => x.includes(' ') || names.filter(y => y.startsWith(x + ' ')).length < 2);
+    names.sort((a, b) => b.length - a.length);
+    const re = names.length ? new RegExp('(^|[^A-Za-z0-9_])(' + names.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![A-Za-z0-9_])', 'g') : null;
+    autoCache = { ver: dataVer, re, names };
+    return re;
+  }
+  function autoLinkText(t) { // t: plain (not escaped) text without [[ ]]
+    const re = autoLinkRe(); if (!re) return esc(t);
+    let out = '', last = 0, m; re.lastIndex = 0;
+    while ((m = re.exec(t))) { const at = m.index + m[1].length; out += esc(t.slice(last, at)) + jlinkBtn(m[2]); last = at + m[2].length; }
+    return out + esc(t.slice(last));
+  }
+  const linkify = s => {
+    s = String(s ?? ''); let out = '', last = 0; const re = /\[\[([^\[\]\n]{1,60})\]\]|\b(?:https?:\/\/|www\.)\S+/g; let m;
+    while ((m = re.exec(s))) { out += autoLinkText(s.slice(last, m.index)) + (m[1] ? jlinkBtn(m[1].trim()) : esc(m[0])); last = m.index + m[0].length; }
+    return out + autoLinkText(s.slice(last));
+  };
   const entryTitle = lines => (lines.find(l => l.text.trim()) || { text: '' }).text.trim().slice(0, 80);
   const tKey = s => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const kids = (ls, i) => !!(ls[i + 1] && ls[i + 1].lvl > ls[i].lvl);
@@ -3698,7 +3729,7 @@
     if (tasks.length) body += section('Tasks', tasks, { showList: true });
     count += pages.length + papers.length + tasks.length;
     html += count ? '<div class="nlabel jmentions">Mentions</div>' + body : '<p class="hint jnone">No mentions yet. Write [[' + esc(name) + ']] in the journal, a note or a task and it shows up here.</p>';
-    return { title: name, sub: meets.length ? meets.length + ' meeting' + (meets.length === 1 ? '' : 's') : count + ' mention' + (count === 1 ? '' : 's'), html, actions: '<button type="button" class="chipbtn" data-jback="1">' + I.left + 'Journal</button>' };
+    return { title: name, sub: meets.length ? meets.length + ' meeting' + (meets.length === 1 ? '' : 's') : count + ' mention' + (count === 1 ? '' : 's'), html, actions: '<button type="button" class="chipbtn" data-jauto="' + esc(name) + '" title="When on, “' + esc(name) + '” written anywhere shows as a link without [[ ]]">Auto-link: ' + (pg && pg.noAuto ? 'off' : 'on') + '</button>' + '<button type="button" class="chipbtn" data-jback="1">' + I.left + 'Journal</button>' };
   }
   const pageRow = p => '<div class="task knote"><span class="evicon">' + I.journal + '</span><div class="tbody" data-jlink="' + esc(p.title) + '" role="button" tabindex="0"><div class="ttitle">' + esc(p.title) + '</div><div class="tmeta"><span>Page</span></div></div></div>';
 
@@ -4013,6 +4044,7 @@
       }
       const jl = e.target.closest('[data-jlink]'); if (jl) { e.stopPropagation(); openLink(jl.dataset.jlink); return; }
       if (e.target.closest('[data-jback]')) { setView('journal'); return; }
+      const ja = e.target.closest('[data-jauto]'); if (ja) { const nm = ja.dataset.jauto; const pg = pageFor(nm) || newTask({ type: 'page', title: nm, listId: 'inbox', notes: '' }); pg.noAuto = !pg.noAuto; if (!pg.noAuto) delete pg.noAuto; save(); render(); toast(pg.noAuto ? '“' + nm + '” only links when written as [[' + nm + ']]' : '“' + nm + '” now links everywhere it’s written', true); return; }
       const jmo = e.target.closest('[data-jmonth]'); if (jmo) { e.stopPropagation(); const b = ui.jMonth || D.fromISO(ui.jEdit || todayISO()); ui.jMonth = new Date(b.getFullYear(), b.getMonth() + Number(jmo.dataset.jmonth), 1); renderMain(); return; }
       const jo = e.target.closest('[data-jopen]'); if (jo) { ui.jMonth = null; e.stopPropagation(); ui.jEdit = jo.dataset.jopen; ui.selected = null; ui.dayPanel = null; setView('journal'); focusJournal(); return; }
       if (e.target.matches && e.target.matches('.ol:not(.ro)')) { const ins = e.target.querySelectorAll('.ol-line:not(.hid) .ol-in'), last = ins[ins.length - 1]; if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); } return; }
