@@ -1074,3 +1074,14 @@ button.ol-dot.folded { box-shadow: none; }
 
 .remrow { display: grid; grid-template-columns: 1fr 120px; gap: 6px; }
 .presets .chipbtn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* Notes and Important Documents: Google Keep-style card in the middle of the screen (computer) */
+.paper-bg { position: fixed; inset: 0; z-index: 27; background: rgba(10,14,20,.45); }
+.paper-bg[hidden] { display: none; }
+.detail.paper-modal { position: fixed; z-index: 28; left: 50%; top: 7vh; right: auto; bottom: auto; transform: translateX(-50%); width: min(720px, calc(100vw - 48px)); max-width: none; max-height: 86vh; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 64px rgba(10,14,20,.28); overflow: hidden; }
+.detail.paper-modal .d-scroll { padding: 18px 22px 12px; }
+.detail.paper-modal .ntitle-in { font-size: 20px; font-weight: 600; }
+.detail.paper-modal .nbody-in { min-height: 42vh; font-size: 15px; line-height: 1.55; border: 0; padding: 4px 0; background: transparent; box-shadow: none; resize: none; }
+.detail.paper-modal .nbody-in:focus { outline: none; }
+.detail.paper-modal .nrich-wrap { min-height: 42vh; font-size: 15px; line-height: 1.55; }
+.detail.paper-modal .d-foot { padding: 10px 22px 14px; }

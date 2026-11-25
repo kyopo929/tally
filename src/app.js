@@ -1127,16 +1127,24 @@
   }
 
   /* ---------- detail ---------- */
+  // Notes and Important Documents open like Google Keep on a computer: a big card in the middle, the rest dimmed.
+  function paperModal(on) {
+    const el = $('#detail'); el.classList.toggle('paper-modal', on);
+    let bg = $('#paperBg');
+    if (!bg) { bg = document.createElement('div'); bg.id = 'paperBg'; bg.className = 'paper-bg'; bg.hidden = true; document.body.appendChild(bg); bg.addEventListener('click', () => { ui.selected = null; render(); }); }
+    bg.hidden = !on;
+  }
   function renderDetail() {
     const el = $('#detail');
     const t = ui.selected && taskById(ui.selected);
+    paperModal(!!t && isPaper(t) && !isPhone());
     if (!t) {
       if (ui.dayPanel) { el.hidden = false; el.innerHTML = dayPanelHtml(ui.dayPanel); return; }
       el.hidden = true; return;
     }
     el.hidden = false;
     if (isEvent(t)) { el.innerHTML = eventDetail(t); autosize($('#dTitle')); return; }
-    if (isPaper(t)) { el.innerHTML = isDoc(t) ? docEditor(t) : noteEditor(t); autosize($('#nBody')); hydrate(el); return; }
+    if (isPaper(t)) { const keep = el.dataset.open === t.id; el.dataset.open = t.id; el.innerHTML = isDoc(t) ? docEditor(t) : noteEditor(t); autosize($('#nBody')); hydrate(el); if (!keep && !isPhone() && el.classList.contains('paper-modal')) { const b = $('#nBody'); if (b && !b.hidden && !(t.title || t.body)) b.focus(); } return; }
     const T = todayISO();
     const groupsOpts = (() => {
       let s = '';
