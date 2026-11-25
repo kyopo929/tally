@@ -30,6 +30,7 @@ t('soft: shows, teams, sports outlets', () => {
   assert.ok(soft({ title: "'Dancing With the Stars' Season 35 Couples Perform Their Last Dances", source: 'USA Today' }));
   assert.ok(soft({ term: 'aaron rodgers', title: 'Steelers bench Aaron Rodgers for Mason Rudolph', source: 'CBS' }));
   assert.ok(soft({ term: 'drew allar', title: 'Some headline', source: 'Steelers Depot' }));
+  assert.ok(soft({ title: 'Mario Kart World Has Been Updated To Version 1.9.0, Here Are The Full Patch Notes', source: 'Nintendo Life' }));
   assert.ok(soft({ term: 'lakers vs suns', title: 'x', source: 'AP' }));
   assert.ok(soft({ term: 'miss international 2026', title: 'Katrina Johnson says it is a dream', source: 'Rappler' }));
   assert.ok(soft({ title: 'Some player story', source: 'AP' }, new Set([key('Some player story')])));

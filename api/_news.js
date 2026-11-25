@@ -65,11 +65,11 @@ const SOFT_WORDS = new RegExp('\\b(' + [
   'lakers', 'celtics', 'knicks', 'warriors', 'bulls', 'nets', 'mavericks', 'nuggets', 'bucks', 'suns', 'clippers', 'spurs', '76ers', 'sixers', 'timberwolves', 'cavaliers', 'pistons', 'hawks', 'yankees', 'dodgers', 'mets', 'red sox', 'cubs', 'astros', 'braves',
   'dancing with the stars', 'bachelor(ette)?', 'survivor', 'american idol', 'the voice', 'love island', 'big brother', 'reality (tv|show|star)',
   'oscars?', 'grammys?', 'emmys?', 'golden globes?', 'box office', 'celebrit(y|ies)', 'kardashians?', 'taylor swift', 'miss (universe|international|america|world|usa)', 'beauty pageant',
-  'season \\d+', 'episode', 'finale', 'premiere', 'trailer', 'album', 'tour dates', 'concert', 'netflix', 'disney\\+', 'hbo', 'marvel', 'star wars', 'video game', 'playstation', 'xbox', 'nintendo',
+  'season \\d+', 'episode', 'finale', 'premiere', 'trailer', 'album', 'tour dates', 'concert', 'netflix', 'disney\\+', 'hbo', 'marvel', 'star wars', 'video games?', 'gaming', 'gamers?', 'playstation', 'xbox', 'nintendo', 'switch 2', 'steam', 'patch notes', 'mario( kart)?', 'pok[eé]mon', 'zelda', 'fortnite', 'minecraft', 'call of duty', 'gta',
   'mega millions', 'powerball', 'lottery', 'horoscope', 'wordle', 'connections hint'
 ].join('|') + ')\\b', 'i');
 function soft(x, softTitles) {
-  const text = [x.term, x.title].filter(Boolean).join(' ');
+  const text = [x.term, x.title, x.source].filter(Boolean).join(' ');
   return SOFT_SOURCES.test(x.source || '') || SOFT_WORDS.test(text) || !!(softTitles && x.title && softTitles.has(key(x.title)));
 }
 function key(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 70); }
