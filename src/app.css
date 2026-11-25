@@ -1089,3 +1089,7 @@ button.ol-dot.folded { box-shadow: none; }
 .nexp svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--accent); }
 .nexp.expired { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
 .nexp.expired svg { color: var(--danger); }
+.nexps { margin: 10px 0 4px; display: grid; gap: 6px; }
+.nexps .nexp { margin: 0; }
+.nexp-head { font-size: 11.5px; color: var(--muted); }
+.nexp-from { color: var(--muted); font-weight: 400; }

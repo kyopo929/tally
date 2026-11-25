@@ -2746,9 +2746,12 @@
   // Notes have no expiry date field. A license, visa or passport found in a note's photos or PDFs still gets its
   // "… expires" task (on the calendar and in tasks); the note just says what was found, with a way to undo it.
   function noteExpLine(raw) {
-    const n = E(raw); if (!n.expires) return '';
-    const x = expInfo(n.expires);
-    return '<div class="nexp' + (x ? ' ' + x.cls : '') + '">' + I.cal + '<span>' + (n.expAuto ? 'Found automatically: ' : '') + '<b>' + esc(docName(raw)) + ' expires ' + fmtLong(n.expires) + '</b>. It’s on your calendar and tasks, with reminders. <button type="button" class="example" data-ndact="clearexp">Not right? Remove</button></span></div>';
+    const n = E(raw), rows = [];
+    const row = (date, what, from, btn) => { const x = expInfo(date); return '<div class="nexp' + (x ? ' ' + x.cls : '') + '">' + I.cal + '<span><b>' + esc(what) + '</b>' + (from ? ' <span class="nexp-from">(' + esc(from) + ')</span>' : '') + ': ' + (x ? esc(x.text) : '') + '. ' + btn + '</span></div>'; };
+    if (n.expires) rows.push(row(n.expires, docName(raw), '', '<button type="button" class="example" data-ndact="clearexp">Remove</button>'));
+    (raw.expDocs || []).filter(e => !e.no).forEach(e => rows.push(row(e.date, expDocName(raw, e), e.k === 'note' ? 'from the note text' : e.file, '<button type="button" class="example" data-ndact="expno:' + esc(e.k) + '">Not right? Remove</button>')));
+    if (!rows.length) return '';
+    return '<div class="nexps"><div class="nexp-head">Expiry dates found · each one is on your calendar and tasks, with reminders</div>' + rows.join('') + '</div>';
   }
   function expField(t) {
     const x = expInfo(t.expires);
@@ -2777,18 +2780,21 @@
     const out = []; if (!text) return out;
     let m; EXP_WORDS.lastIndex = 0;
     while ((m = EXP_WORDS.exec(text))) {
-      const win = text.slice(m.index + m[0].length, m.index + m[0].length + 70);
+      // Every date just after the word; the latest is the expiry (cards often print "Issue Date  Expiry Date"
+      // with both dates on the line below, so the first date there is the issue date)
+      const win = text.slice(m.index + m[0].length, m.index + m[0].length + 70), got = [];
       for (let i = 0; i < win.length; i++) {
         if (i && /[a-z0-9]/i.test(win[i - 1])) continue; // start at a word boundary
-        const d = readDate(win.slice(i), dayFirst); if (d) { out.push(d); break; }
+        const d = readDate(win.slice(i), dayFirst); if (d) got.push(d);
       }
+      if (got.length) out.push(got.sort().pop());
     }
     // Passport machine-readable line: ...<birth YYMMDD><check><sex><expiry YYMMDD><check>
     const mrz = text.toUpperCase().replace(/[ \t]/g, '').match(/[A-Z0-9<]{9}\d[A-Z<]{3}\d{6}\d[MF<](\d{2})(\d{2})(\d{2})\d/);
     if (mrz) { const d = mkISO(2000 + +mrz[1], +mrz[2], +mrz[3]); if (d) out.push(d); }
     return out;
   }
-  const KINDS = [[/passport|passeport|reisepass|여권|^P<[A-Z<]{3}/im, 'Passport'], [/emirates\s*id|identity\s*card|resident\s*identity|بطاقة الهوية/i, 'Emirates ID'], [/driving\s*licen[cs]e|driver'?s?\s*licen[cs]e/i, 'Driver’s license'], [/trade\s*licen[cs]e|economic\s*licen[cs]e/i, 'Trade license'], [/vehicle|registration|mulkiya|traffic\s*plate/i, 'Car registration'], [/residen(ce|t)\s*(visa|permit)|entry\s*permit|\bvisa\b/i, 'Visa'], [/insurance/i, 'Insurance']];
+  const KINDS = [[/passport|passeport|reisepass|여권|^P<[A-Z<]{3}/im, 'Passport'], [/establishment\s*card|immigration\s*(establishment\s*)?card|est(ablishment)?\.?\s*card\s*no/i, 'Establishment card'], [/labou?r\s*card|work\s*permit/i, 'Labour card'], [/ejari|tenancy\s*contract/i, 'Tenancy contract'], [/emirates\s*id|identity\s*card|resident\s*identity|بطاقة الهوية/i, 'Emirates ID'], [/driving\s*licen[cs]e|driver'?s?\s*licen[cs]e/i, 'Driver’s license'], [/trade\s*licen[cs]e|economic\s*licen[cs]e/i, 'Trade license'], [/vehicle|registration|mulkiya|traffic\s*plate/i, 'Car registration'], [/residen(ce|t)\s*(visa|permit)|entry\s*permit|\bvisa\b/i, 'Visa'], [/insurance/i, 'Insurance']];
   const guessKind = text => { for (const [re, name] of KINDS) if (re.test(text)) return name; return ''; };
   const KIND_NAMES = KINDS.map(k => k[1]);
   const COUNTRY = { USA: 'US', KOR: 'Korean', ARE: 'UAE', GBR: 'UK', IND: 'Indian', PHL: 'Philippine', PAK: 'Pakistani', CAN: 'Canadian', AUS: 'Australian', NZL: 'New Zealand', JPN: 'Japanese', CHN: 'Chinese', FRA: 'French', DEU: 'German', D: 'German', ITA: 'Italian', ESP: 'Spanish', IRL: 'Irish', EGY: 'Egyptian', JOR: 'Jordanian', LBN: 'Lebanese', SAU: 'Saudi', LKA: 'Sri Lankan', NPL: 'Nepali', BGD: 'Bangladeshi', IDN: 'Indonesian', RUS: 'Russian', ZAF: 'South African' };
@@ -2835,6 +2841,11 @@
       const l2 = flat.match(/[A-Z0-9<]{9}\d[A-Z<]{3}(\d{6})\d[MF<]\d{6}\d/); if (l2) out.dob = l2[1];
     } else if (kind === 'Car registration' || kind === 'Insurance') {
       const car = carName(up); if (car) out.title = car + (kind === 'Insurance' ? ' insurance' : ' registration');
+    } else if (kind === 'Establishment card' || kind === 'Trade license') {
+      // a company, not a person: use its full name ("Acme Trading LLC")
+      const m = text.match(/(?:establishment|company|trade)\s*name\s*[:.\-]?\s*([A-Za-z0-9][^\n]{1,60})/i) || text.match(/\bname\s*[:.\-]?\s*([A-Za-z0-9][^\n]{1,60})/i);
+      const co = m ? m[1].replace(/\s{2,}.*$/, '').trim() : '';
+      if (co && /[A-Za-z]{2}/.test(co)) out.holder = nameCase(co).replace(/\b(Llc|Fze|Fzco|Fzc|Fz-llc|Dmcc|Plc|Ltd)\b/g, w => w.toUpperCase()).slice(0, 40);
     } else {
       out.holder = firstName(/\bname\s*[:.\-]?\s*([A-Za-z][^\n]{1,40})/i);
     }
@@ -2849,10 +2860,63 @@
   }
   // Fills in expiry dates nobody set by hand; the renewal task and calendar follow from setExpiry
   const isMe = name => !!name && (S.settings.meNames || []).some(x => x.toLowerCase() === name.trim().toLowerCase());
+  // ---- Notes: every photo or PDF (and the note's own text) is read on its own, so a note holding a passport,
+  // a visa and an establishment card gets three "… expires" tasks, each named after its own document.
+  // Entries live in note.expDocs: { k: file id or 'note', file, date, title, holder, taskId, taskFor, no }.
+  function noteSources(t) {
+    const v = E(t), out = (t.attachments || []).filter(a => !a.arch && a.text).map(a => ({ k: a.id, file: a.name || 'file', text: a.text, dayFirst: true }));
+    const own = [v.title, v.body].filter(Boolean).join('\n'); if (own.trim()) out.push({ k: 'note', file: '', text: own, dayFirst: false });
+    return out;
+  }
+  function pickExpiry(dates) {
+    const T = todayISO(), future = dates.filter(d => d >= T).sort();
+    const past = dates.filter(d => d < T && d >= String(+T.slice(0, 4) - 10) + T.slice(4)).sort();
+    return future[0] || past[past.length - 1] || null;
+  }
+  function expDocName(note, e) {
+    const base = e.title || noteTitle(note), h = (e.holder || '').trim();
+    return h && !base.toLowerCase().includes(h.toLowerCase()) ? h + '\u2019s ' + base : base;
+  }
+  function placeDocTask(note, e, dup) {
+    const cur = e.taskId && taskById(e.taskId), live = cur && !cur.done ? cur : null;
+    if (dup || e.no || !e.date || e.date < todayISO()) { if (live) trashTask(live); if (dup) { e.taskId = null; e.taskFor = null; } return; }
+    const L = linked(e.taskId, e.date, e.taskFor); if (!L.t && L.keep) return;
+    let t = L.t; if (!t) { t = newTask({ renewFor: note.id, expFor: note.id, expKey: e.k }); e.taskId = t.id; }
+    e.taskFor = e.date;
+    if (t.due !== e.date || t.lead === undefined) { t.due = e.date; t.lead = t.lead ?? 60; t.remindedFor = null; }
+    const now = D.toLocalDT(new Date());
+    t.reminder = expTaskStages(t).find(x => x > (t.remindedFor && t.remindedFor > now ? t.remindedFor : now)) || null;
+    t.time = null; t.title = expDocName(note, e) + ' expires';
+  }
+  function scanNoteDocs(t) {
+    const list = t.expDocs || [], found = [], seen = new Set();
+    for (const src of noteSources(t)) {
+      const date = pickExpiry(expiryDatesIn(src.text, src.dayFirst)); if (!date) continue;
+      const d = describeDoc(src.text); let hold = d.holder; if (isMe(hold)) hold = '';
+      seen.add(src.k);
+      let e = list.find(x => x.k === src.k);
+      if (!e) { e = { k: src.k, file: src.file, date, title: d.kind ? d.title : '', holder: hold }; list.push(e); found.push({ name: expDocName(t, e), date }); }
+      else if (!e.no && (e.date !== date || (d.kind && e.title !== d.title) || (hold && e.holder !== hold))) { e.date = date; if (d.kind) e.title = d.title; if (hold) e.holder = hold; e.file = src.file; found.push({ name: expDocName(t, e), date }); }
+    }
+    // a file that was deleted or archived takes its task with it
+    for (const e of list.slice()) if (!seen.has(e.k)) { const x = e.taskId && taskById(e.taskId); if (x && !x.done) trashTask(x); list.splice(list.indexOf(e), 1); }
+    // From before: one expiry date for the whole note. Its task carries on as the matching document's task.
+    if (t.expAuto && t.expires) {
+      const m = list.find(e => e.date === t.expires && !e.taskId);
+      if (m) { m.taskId = t.expTaskId; m.taskFor = t.expTaskFor; } else { const old = expTask(t); if (old) trashTask(old); }
+      t.expires = null; t.expTaskId = null; t.expTaskFor = null; t.expAuto = false;
+    }
+    // the same document photographed twice (front and back) gets one task
+    list.forEach((e, i) => placeDocTask(t, e, !e.no && list.slice(0, i).some(o => !o.no && o.date === e.date && expDocName(t, o) === expDocName(t, e))));
+    if (list.length) t.expDocs = list; else delete t.expDocs;
+    return found;
+  }
   function autoExpiryScan() {
     const found = [], backOnly = []; let moved = 0, fixed = 0;
+    const foundNotes = [];
+    for (const t of S.tasks.slice()) if (t.type === 'note' && !t.archived && !shut(t) && !t.expNo && (!t.expires || t.expAuto)) foundNotes.push(...scanNoteDocs(t));
     for (let pass = 0; pass < 2; pass++) for (const t of S.tasks) { // second pass: names borrowed from a twin passport
-      if (!isPaper(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // notes too: a passport or visa photo in a note still gets its expiry task
+      if (!isDoc(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // notes too: a passport or visa photo in a note still gets its expiry task
       if (t.expAuto && t.titleAuto === undefined && KIND_NAMES.includes(t.title)) t.titleAuto = true; // named by an earlier version
       if (t.holderAuto && t.holder && isMe(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; }
       if (t.holderAuto && t.holder && !plausibleName(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; } // a misread name from before
@@ -2868,10 +2932,11 @@
       if (r.date === t.expires && !changed && (t.expTaskId || r.date < todayISO())) continue;
       setExpiry(t, r.date); t.expAuto = true; if (!found.includes(t)) found.push(t);
     }
+    if (foundNotes.length) { save(); render(); toast((foundNotes.length === 1 ? 'Found ' + foundNotes[0].name + ': expires ' + fmtLong(foundNotes[0].date) : 'Found ' + foundNotes.length + ' expiry dates') + '. Tasks added.', true); }
     if ((fixed || moved) && !found.length) { save(); render(); }
     if (moved && !found.length) toast(moved + ' note' + (moved === 1 ? ' was' : 's were') + ' put back in Notes. Move them to Important Documents yourself if you want.', true);
     if (found.length) { save(); render(); toast((found.length === 1 ? 'Found ' + docName(found[0]) + ': expires ' + fmtLong(found[0].expires) : 'Found ' + found.length + ' expiry dates') + '. Tasks added' + (moved ? '. Notes moved to Important Documents earlier were put back in Notes' : '') + '.', true); }
-    return found.length;
+    return found.length + foundNotes.length;
   }
 
   // ---- names and search
@@ -3295,6 +3360,7 @@
           else { raw.type = 'note'; raw.kind = 'text'; ui.view = 'notes'; }
           touchNote(raw); save(); render(); toast(isDoc(raw) ? 'Moved to Important Documents' : 'Moved to Notes', true);
         }
+        if (a.startsWith('expno:')) { const e = (raw.expDocs || []).find(x => x.k === a.slice(6)); if (e) { e.no = true; placeDocTask(raw, e); } touchNote(raw); save(); render(); return; }
         if (a === 'clearexp') { raw.expAuto = false; raw.expNo = true; setExpiry(raw, null); touchNote(raw); save(); render(); }
         if (a === 'del') { snapshot(); trashTask(raw); save(); render(); toast((isDoc(raw) ? 'Document' : 'Note') + ' moved to Recently deleted', true); }
         return;
