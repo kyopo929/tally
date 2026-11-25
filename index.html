@@ -4302,7 +4302,7 @@ button.ol-dot.folded { box-shadow: none; }
   function autoExpiryScan() {
     const found = [], backOnly = []; let moved = 0, fixed = 0;
     for (let pass = 0; pass < 2; pass++) for (const t of S.tasks) { // second pass: names borrowed from a twin passport
-      if (!isPaper(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue;
+      if (!isDoc(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // Important Documents only; notes have no expiry date
       if (t.expAuto && t.titleAuto === undefined && KIND_NAMES.includes(t.title)) t.titleAuto = true; // named by an earlier version
       if (t.holderAuto && t.holder && isMe(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; }
       if (t.holderAuto && t.holder && !plausibleName(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; } // a misread name from before
@@ -4465,7 +4465,8 @@ button.ol-dot.folded { box-shadow: none; }
         ? '<div class="nitems">' + items.filter(i => !i.done).map(itemRow).join('') + '<input id="nNewItem" class="nitext add" placeholder="+ List item" aria-label="Add list item">' + (items.some(i => i.done) ? '<div class="nlabel">' + items.filter(i => i.done).length + ' checked</div>' + items.filter(i => i.done).map(itemRow).join('') : '') + '</div>'
         : noteTools() + (hasRich(n.body) && ui.nRaw !== n.id ? '<div class="nrich-wrap" data-nraw="1" title="Click to edit">' + richBody(n.body, n.id) + '</div><textarea id="nBody" class="ctl nbody-in" hidden aria-label="Note">' + esc(n.body || '') + '</textarea>' : '<textarea id="nBody" class="ctl nbody-in" placeholder="Note" aria-label="Note">' + esc(n.body || '') + '</textarea>')) +
       '<div class="links" id="dLinks">' + linksHtml({ title: n.title, notes: n.kind === 'list' ? items.map(i => i.text).join(' ') : n.body }) + '</div>' +
-      attGrid(n) + dropZone() + expField(n) +
+      attGrid(n) + dropZone() + (n.expires ? expField(n) : '') + // notes have no expiry date; one set by an earlier version can still be cleared here
+      
       '</div><div class="d-foot nfoot"><button type="button" class="chipbtn" data-ndact="archive">' + I.archive + (n.archived ? 'Unarchive' : 'Archive') + '</button><button type="button" class="chipbtn" data-ndact="lock">' + I.lock + (raw.locked ? 'Unlock' : 'Lock') + '</button><button type="button" class="chipbtn" data-ndact="move">Move to Important Documents</button><span class="spacer"></span><button type="button" class="danger-btn" data-ndact="del">Delete</button></div>';
   }
   function docEditor(raw) {
