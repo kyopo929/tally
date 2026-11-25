@@ -28,10 +28,10 @@ module.exports = async function handler(req, res) {
   const softList = list(sports, 80).concat(list(ent, 80)).map(s => s.title);
   const softTitles = new Set(softList.map(key)); softTitles.list = softList;
   const real = arr => arr.filter(x => !soft(x, softTitles));
-  const stories = real(list(top, 40)).slice(0, 5);
+  const stories = real(list(top, 40)).slice(0, 15); // the app shows 5; the rest replace stories you hide
   const dxbAll = real(list(dxb, 40)).filter(x => !PR.test(x.source || ''));
-  const dubai = notIn(dxbAll.filter(x => UAE.test(x.source || '')).concat(dxbAll.filter(x => !UAE.test(x.source || ''))), stories, x => x.title)
-    .filter((x, i, arr) => arr.findIndex(y => sameStory(y.title, x.title)) === i).slice(0, 3);
+  const dubai = notIn(dxbAll.filter(x => UAE.test(x.source || '')).concat(dxbAll.filter(x => !UAE.test(x.source || ''))), stories.slice(0, 5), x => x.title)
+    .filter((x, i, arr) => arr.findIndex(y => sameStory(y.title, x.title)) === i).slice(0, 10);
   if (!stories.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min
   res.statusCode = 200;

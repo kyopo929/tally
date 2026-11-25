@@ -64,3 +64,9 @@ t('same story across outlets', () => {
   assert.strictEqual(notIn([{ title: "Shenzhou 24: Pakistan's first astronaut goes to space" }, { title: 'Other' }], [{ title: "Shenzhou 24: Pakistan's first astronaut goes to space aboard Chinese rocket" }], x => x.title).length, 1);
 });
 console.log('news: ' + n + ' passed');
+{
+  const { iacadDays } = require('../api/_prayer');
+  const d = iacadDays({ code: 200, data: [{ Country: { Pray: [{ Date: '11/25/2026', Asr: '15:09:00', Maghrib: '17:32:00', Isha: '18:50:00' }] } }, { country: { pray: [{ date: '12/01/2026', asr: '15:09:00', maghrib: '17:32:00', isha: 'x' }] } }] });
+  assert.deepStrictEqual(d, { '2026-11-25': { asr: '15:09', maghrib: '17:32', isha: '18:50' } });
+  console.log('prayer: 1 passed');
+}

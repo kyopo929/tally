@@ -14,7 +14,7 @@ function marketState(q) {
   const p = q && q.tp && q.tp.regular, now = Date.now() / 1000;
   if (p && now >= p.start && now < p.end) return 'US market open';
   const t = q && q.at ? new Date(q.at) : null;
-  return t ? 'US market closed · last price ' + t.toLocaleString('en-US', { timeZone: 'Asia/Dubai', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' Dubai time' : 'US market closed';
+  return t ? 'US market closed · ' + t.toLocaleString('en-US', { timeZone: 'Asia/Dubai', weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'US market closed';
 }
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
