@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
       method: 'POST', body: JSON.stringify({ integrationId: 1 }),
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (Tally)', 'Referer': 'https://www.iacad.gov.ae/en/prayer-times' }
     });
-    if (!r.ok) throw new Error('source ' + r.status);
+    if (!r.ok) throw new Error('IACAD answered ' + r.status);
     const days = iacadDays(await r.json());
     if (!Object.keys(days).length) throw new Error('empty');
     res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400'); // 6h
@@ -21,6 +21,6 @@ module.exports = async function handler(req, res) {
     res.end(JSON.stringify({ source: 'IACAD', days }));
   } catch (e) {
     res.statusCode = 502;
-    res.end(JSON.stringify({ error: 'IACAD unavailable' }));
+    res.end(JSON.stringify({ error: 'IACAD unavailable', why: String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 120) }));
   }
 };
