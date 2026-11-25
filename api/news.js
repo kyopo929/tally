@@ -1,14 +1,14 @@
 // GET /api/news → for the sidebar on computers ("real news": no sports or entertainment):
 //   stories:  Google News "Top stories" (US edition)
 //   breaking: stories from the last 90 minutes (top stories + Google News U.S., World and Business sections)
-//   trending: Google Trends "Trending now" (US) with the top article for each search
+//   trending: Google Trends "Trending now" (US), only searches whose story is also in a Google News news section
 // Anything also listed in Google News' Sports or Entertainment sections, from a sports/entertainment
 // outlet, or about games, teams, shows or celebrities is left out (api/_news.js `soft`),
 // except big moments: a major championship won or a famous person's death (`big`).
 // Only the original site serves it; copies of Tally get 404 and the sidebar box stays hidden.
 'use strict';
 const { isOriginal } = require('./_cfg');
-const { parseNews, parseTrends, pickBreaking, soft, key, notIn } = require('./_news');
+const { parseNews, parseTrends, pickBreaking, soft, key, notIn, inNews } = require('./_news');
 const G = 'hl=en-US&gl=US&ceid=US:en';
 const TOP = 'https://news.google.com/rss?' + G;
 const section = t => 'https://news.google.com/rss/headlines/section/topic/' + t + '?' + G;
@@ -31,8 +31,10 @@ module.exports = async function handler(req, res) {
   const all = real(list(top, 40));
   const stories = all.slice(0, 8);
   // the ticker skips anything already in Top stories
-  const breaking = notIn(pickBreaking([all.slice(8), real(list(us)), real(list(world)), real(list(biz))], 90, 12), stories, x => x.title).slice(0, 6);
-  const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
+  const usL = real(list(us)), worldL = real(list(world)), bizL = real(list(biz));
+  const breaking = notIn(pickBreaking([all.slice(8), usL, worldL, bizL], 90, 12), stories, x => x.title).slice(0, 6);
+  const hard = all.concat(usL, worldL, bizL).map(x => x.title);
+  const trending = trd.status === 'fulfilled' ? notIn(real(parseTrends(trd.value, 25)).filter(t => inNews(t, hard)), stories.concat(breaking), x => x.title).slice(0, 8) : [];
   if (!stories.length && !breaking.length && !trending.length) { res.statusCode = 502; return res.end(JSON.stringify({ error: 'News unavailable' })); }
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900'); // Vercel keeps it 5 min
   res.statusCode = 200;

@@ -51,6 +51,13 @@ t('celebrity + foreign-language trends dropped', () => {
   assert.ok(soft({ term: 'stanley tucci', title: 'The 2009 co-star Stanley Tucci wanted to work with again', source: 'X' }));
   assert.ok(soft({ term: 'día de acción de gracias', title: 'Última hora', source: 'CNN' }));
 });
+t('trend must be in the news sections', () => {
+  const { inNews } = require('../api/_news');
+  const hard = ['Trump administration officials debate targeting Iran assets via US Treasury sanctions', 'South Omaha children center homicide suspect arrested'];
+  assert.ok(inNews({ term: 'us treasury', title: 'Officials weigh Iran move' }, hard));
+  assert.ok(inNews({ term: 'lauren becker omaha', title: 'South Omaha children’s center homicide suspect arrested after chase' }, hard));
+  assert.ok(!inNews({ term: 'amanda seyfried', title: 'Amanda Seyfried Says Billy Evans Encounter Worsened' }, hard));
+});
 t('same story across outlets', () => {
   assert.ok(sameStory('Abrego Garcia Voluntarily Leaves U.S., Ending 20-Month Legal Fight', 'Abrego Garcia Will Voluntarily Leave U.S., Ending 20-Month Legal Ordeal'));
   assert.ok(!sameStory('Asian Stocks to Slide as AI Trade Doubts Resurface', 'US court convicts Huawei for fraud'));

@@ -92,4 +92,9 @@ function sameStory(a, b) {
   return n >= 3 && n / Math.min(A.size, B.size) >= 0.5;
 }
 function notIn(items, stories, text) { return items.filter(x => !stories.some(s => sameStory(text(x), s.title))); }
-module.exports = { parseNews, parseTrends, pickBreaking, soft, key, big, sameStory, notIn };
+// A trending search counts as news only if Google News also carries it in a news section
+function inNews(trend, hardTitles) {
+  const tw = [...words(trend.term)];
+  return hardTitles.some(h => sameStory(trend.title, h) || (tw.length && (() => { const H = words(h); return tw.every(w => H.has(w)); })()));
+}
+module.exports = { parseNews, parseTrends, pickBreaking, soft, key, big, sameStory, notIn, inNews };
