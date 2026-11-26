@@ -1255,3 +1255,17 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .btable .bbtns { white-space: nowrap; }
 .btable tr.badj td:nth-child(2) .ctl, .btable tr.badj td:nth-child(3) .ctl { color: var(--muted); }
 .btable tr.badj td:nth-child(2) { padding-left: 18px; }
+
+.sheetwrap { max-height: 70vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.btable.sheet { min-width: 1150px; }
+.btable.sheet thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.btable.sheet td { padding: 1px 2px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.btable.sheet .ctl { border-color: transparent; background: transparent; padding: 4px 6px; border-radius: 4px; }
+.btable.sheet .ctl:hover { border-color: var(--line); }
+.btable.sheet .ctl:focus { border-color: var(--accent); background: var(--surface); }
+.btable.sheet .s-date { width: 128px; } .btable.sheet .s-payee { min-width: 150px; } .btable.sheet .ctl.sm { width: 92px; } .btable.sheet .s-what { min-width: 230px; }
+.btable.sheet .s-dep, .btable.sheet .s-chk { width: 104px; } .btable.sheet .s-note { min-width: 150px; }
+.btable.sheet .sbal { font-variant-numeric: tabular-nums; white-space: nowrap; padding: 0 8px; color: var(--muted); }
+.btable.sheet tr.bad .s-payee { color: var(--danger); }
+.btable.sheet .ssec { padding: 10px 6px 6px; font-size: 12px; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--line) 30%, transparent); }
+.btable.sheet th:first-child, .btable.sheet td:first-child { width: 136px; }
