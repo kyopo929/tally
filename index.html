@@ -4827,8 +4827,8 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       const sum = k => es.filter(e => e.kind === k).reduce((s, e) => s + e.amt, 0), net = es.reduce((s, e) => s + e.amt, 0); run += net;
       rows.push({ ms, pay: sum('pay'), mo: sum('mo'), other: sum('other'), inn: sum('in'), net, end: run });
     }
-    const low = bal == null ? null : rows.reduce((a, r) => r.end < a.end ? r : a, rows[0]);
-    if (bal != null && low && low.end < 0) h += '<div class="pwarn">The balance goes below zero in <b>' + esc(monthName(low.ms)) + '</b> (AED ' + money(low.end) + ').</div>';
+    const neg = bal == null ? null : rows.find(r => r.end < 0), low = rows.reduce((a, r) => r.end < a.end ? r : a, rows[0]);
+    if (neg) h += '<div class="pwarn">The balance goes below zero in <b>' + esc(monthName(neg.ms)) + '</b> (AED ' + money(neg.end) + ' at the end of the month)' + (low !== neg ? ' and is lowest in <b>' + esc(monthName(low.ms)) + '</b> (AED ' + money(low.end) + ')' : '') + '.</div>';
     h += '<div class="pscroll"><table class="ptable fc"><thead><tr><th>Month</th><th class="r">Payroll</th><th class="r">Month-end</th><th class="r">Other payments</th><th class="r">Money in</th><th class="r">Net</th><th class="r">' + (bal == null ? 'Running total' : 'Balance at month end') + '</th></tr></thead><tbody>' +
       rows.map(r => '<tr><td>' + esc(monthName(r.ms)) + '</td><td class="r">' + money0(-r.pay) + '</td><td class="r">' + money0(-r.mo) + '</td><td class="r">' + money0(-r.other) + '</td><td class="r in">' + money0(r.inn) + '</td><td class="r' + (r.net < 0 ? ' neg' : '') + '">' + money0(r.net) + '</td><td class="r' + (r.end < 0 ? ' neg' : '') + '"><b>' + money0(r.end) + '</b><span class="psub">$' + money0(r.end / rate) + '</span></td></tr>').join('') + '</tbody></table></div>' +
       '<p class="hint pcenter">Payroll uses the roster (new people at full 2-week pay). Payrolls and payments already in To pay are counted on their date instead.</p>';
