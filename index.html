@@ -1656,15 +1656,78 @@ button.ol-dot.folded { box-shadow: none; }
     s.groups = [];
     if (s.settings) s.settings.scope = 'all';
   }
-  function load() {
+  function fromRaw(raw) {
     try {
-      const raw = localStorage.getItem(KEY);
       if (raw) { const s = JSON.parse(raw); if (s && s.version === 1) { s.trash = s.trash || { tasks: [], lists: [] }; simplify(s); s.settings = Object.assign({ scope: 'all', theme: 'sage', mode: 'system', autoRemind: true }, s.settings); return s; } }
     } catch (e) { }
     return seed();
   }
+
+  /* ---------- saving on this device ---------- */
+  // Your data and the sync bookkeeping live in IndexedDB ("tally-data"), which has room for far more than localStorage's ~5 MB.
+  // Saves are batched (a burst of edits is one write). If a save fails, a banner says so and it keeps retrying.
+  // Other Tally windows on the device hear about each save through a BroadcastChannel.
+  const STORE = { db: null, off: false, queue: new Map(), timer: null, failing: false, bc: null };
+  try { STORE.bc = new BroadcastChannel('tally-data'); } catch (e) { }
+  function dbOpen() {
+    if (STORE.db) return Promise.resolve(STORE.db);
+    return new Promise((res, rej) => {
+      let r; try { r = indexedDB.open('tally-data', 1); } catch (e) { rej(e); return; }
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => { STORE.db = r.result; STORE.db.onversionchange = () => { STORE.db.close(); STORE.db = null; }; res(STORE.db); };
+      r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked'));
+    });
+  }
+  function dbGet(k) { return dbOpen().then(db => new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result == null ? null : q.result); q.onerror = () => rej(q.error); })); }
+  function dbPut(entries) {
+    return dbOpen().then(db => new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readwrite'), st = tx.objectStore('kv');
+      entries.forEach(([k, v]) => st.put(v, k));
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('Not enough space on this device'));
+    }));
+  }
+  // value: a function that returns the string to store (called at write time, so a burst of saves serializes once)
+  function storeLater(k, value) { STORE.queue.set(k, value); if (!STORE.timer) STORE.timer = setTimeout(flushStore, 0); }
+  function flushStore() {
+    clearTimeout(STORE.timer); STORE.timer = null;
+    const items = [...STORE.queue]; STORE.queue.clear(); if (!items.length) return Promise.resolve();
+    let entries; try { entries = items.map(([k, f]) => [k, f()]); } catch (e) { saveFailed(e, items); return Promise.resolve(); }
+    const done = () => { if (STORE.failing) { STORE.failing = false; saveWarn(null); } if (STORE.bc) try { STORE.bc.postMessage({ keys: entries.map(x => x[0]) }); } catch (e) { } };
+    if (STORE.off) { // no IndexedDB here: the old way
+      try { entries.forEach(([k, v]) => localStorage.setItem(k, v)); done(); } catch (e) { saveFailed(e, items); }
+      return Promise.resolve();
+    }
+    return dbPut(entries).then(done, e => saveFailed(e, items));
+  }
+  function saveFailed(err, items) {
+    items.forEach(([k, f]) => { if (!STORE.queue.has(k)) STORE.queue.set(k, f); }); // try again with the newest data
+    STORE.failing = true; saveWarn(err);
+    clearTimeout(STORE.timer); STORE.timer = setTimeout(flushStore, 30000);
+  }
+  function saveWarn(err) {
+    let el = document.getElementById('saveWarn');
+    if (!err) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'saveWarn'; el.setAttribute('role', 'alert'); el.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:9999;max-width:min(560px,92vw);background:#c4372c;color:#fff;padding:10px 14px;border-radius:10px;font:14px/1.4 var(--font-body);box-shadow:0 6px 20px rgba(0,0,0,.25)'; document.body.appendChild(el); }
+    el.textContent = 'Tally couldn’t save your latest changes on this device (' + ((err && (err.message || err.name)) || 'storage problem') + '). Keep Tally open: it tries again every 30 seconds.' + (sync.user ? ' Changes that synced are safe in your account.' : '');
+  }
+  window.addEventListener('pagehide', () => { if (STORE.queue.size) flushStore(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && STORE.queue.size) flushStore(); });
+  // Start-up: read from IndexedDB; the first time, move the data over from localStorage (and free that space once it's safely copied)
+  async function loadStored() {
+    let raw = null, meta = null, fromLS = false;
+    try { [raw, meta] = await Promise.all([dbGet(KEY), dbGet(SYNC_KEY)]); } catch (e) { STORE.off = true; }
+    if (raw == null) { try { raw = localStorage.getItem(KEY); meta = localStorage.getItem(SYNC_KEY); fromLS = raw != null; } catch (e) { } }
+    S = fromRaw(raw);
+    try { const m = JSON.parse(meta || 'null'); if (m && m.shadow) sync.meta = m; } catch (e) { }
+    if (fromLS && !STORE.off) {
+      try { await dbPut([[KEY, raw]].concat(meta ? [[SYNC_KEY, meta]] : [])); localStorage.removeItem(KEY); localStorage.removeItem(SYNC_KEY); } catch (e) { STORE.off = true; }
+    }
+    // Ask the browser to keep Tally's storage even when the device runs low on space
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => { }); } catch (e) { }
+  }
+  async function readStored(k) { if (STORE.off) { try { return localStorage.getItem(k); } catch (e) { return null; } } try { return await dbGet(k); } catch (e) { return null; } }
   let dataVer = 0; // bumped on every save, so caches built from the data know when to rebuild
-  function persistLocal() { dataVer++; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
+  function persistLocal() { dataVer++; storeLater(KEY, () => JSON.stringify(S)); }
   function save() { persistLocal(); schedulePush(); if (vault.key) reseal(); }
   function snapshot() { ui.undo = JSON.stringify(S); }
 
@@ -1756,7 +1819,65 @@ button.ol-dot.folded { box-shadow: none; }
     Object.keys(HOL_COUNTRIES).forEach(c => { if (on[c]) holidayData(c).forEach(h => out.push({ id: 'hol:' + c + ':' + h.start, type: 'event', holiday: true, country: c, expected: !!h.expected, title: h.name + HOL_SUFFIX[c], due: h.start, end: h.end > h.start ? h.end : undefined, steps: [], notes: '' })); });
     return out;
   };
-  const events = () => S.tasks.filter(t => isEvent(t) && taskInScope(t)).concat(holidayEvents());
+  /* ---------- Outlook meetings, read-only (per device; the link and the meetings never go into your Tally data) ---------- */
+  // Outlook on the web → Settings → Calendar → Shared calendars → Publish a calendar gives an .ics link; /api/outlook reads it.
+  const OL_KEY = 'tally-outlook';
+  let olData = null, olMemo = { at: -1, list: [] };
+  try { olData = JSON.parse(localStorage.getItem(OL_KEY) || 'null'); } catch (e) { }
+  const olOn = () => !!(olData && olData.url);
+  function outlookSave() { try { if (olData) localStorage.setItem(OL_KEY, JSON.stringify(olData)); else localStorage.removeItem(OL_KEY); } catch (e) { } }
+  const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  function outlookEvents() {
+    if (!olOn() || !olData.items) return [];
+    if (olMemo.at === olData.at) return olMemo.list;
+    const list = olData.items.map((x, i) => {
+      const o = { id: 'ol:' + i, type: 'event', holiday: true, outlook: true, title: x.title || 'Busy', loc: x.loc || '', free: !!x.free, steps: [], notes: '' };
+      if (x.date) { o.due = x.date; if (x.end) o.end = x.end; }
+      else { const a = new Date(x.start), b = new Date(x.endAt || x.start); o.due = D.toISO(a); o.time = hhmm(a); if (b > a) o.until = hhmm(b) + (D.toISO(b) !== o.due ? ' (next day)' : ''); }
+      return o;
+    });
+    olMemo = { at: olData.at, list };
+    return list;
+  }
+  async function refreshOutlook(force) {
+    if (!olOn() || /claude/.test(location.hostname) || location.protocol === 'file:') return;
+    if (!force && olData.at && Date.now() - olData.at < 10 * 60000) return;
+    try {
+      const r = await fetch('/api/outlook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: olData.url, tz: myTz() }) });
+      const j = await r.json().catch(() => ({}));
+      if (!olOn()) return;
+      if (!r.ok) { olData.err = j.error || ('Couldn’t read the calendar (' + r.status + ')'); olData.errAt = Date.now(); outlookSave(); if ($('#olMsg')) $('#olMsg').textContent = olData.err; return; }
+      olData.items = j.items || []; olData.at = Date.now(); delete olData.err; outlookSave();
+      renderMain(); if (ui.dayPanel) renderDetail();
+      if ($('#olMsg')) $('#olMsg').textContent = olStatus();
+    } catch (e) { if ($('#olMsg')) $('#olMsg').textContent = 'Couldn’t reach the server. Trying again later.'; }
+  }
+  function olStatus() {
+    if (!olOn()) return '';
+    if (olData.err) return 'Problem: ' + olData.err;
+    if (!olData.at) return 'Reading your calendar…';
+    const n = olData.items.length, mins = Math.round((Date.now() - olData.at) / 60000);
+    return n + ' meeting' + (n === 1 ? '' : 's') + ' in the next months · updated ' + (mins < 1 ? 'just now' : mins + ' min ago');
+  }
+  function openOutlook() {
+    const el = $('#sheet');
+    el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="olTitle"><div class="sheet-head"><h2 id="olTitle">Show my Outlook meetings</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
+      '<p>Your Outlook meetings appear in Tally’s calendar and My Day, read-only. Change them in Outlook. They update about every half hour and stay on this ' + (IS_ANDROID ? 'phone' : 'computer') + ' only (paste the link on each device).</p>' +
+      '<h3>Get the link (once)</h3><ol class="howto"><li>Open <b>Outlook on the web</b> (outlook.office.com) and click the <b>⚙ Settings</b> gear.</li><li><b>Calendar → Shared calendars</b>.</li><li>Under <b>Publish a calendar</b>, pick <b>Calendar</b> and <b>Can view all details</b> (or <b>titles and locations</b>), then <b>Publish</b>.</li><li>Click the <b>ICS</b> link and <b>Copy link</b>.</li></ol>' +
+      '<p class="hint">If your company has turned publishing off, the Publish option is missing. Then this can’t be used with your work calendar.</p>' +
+      '<div class="field"><label for="olUrl">ICS link</label><input class="ctl" id="olUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics" value="' + esc(olOn() ? olData.url : '') + '"></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><button type="button" class="chipbtn solid" id="olGo">' + (olOn() ? 'Save and refresh' : 'Show my meetings') + '</button>' + (olOn() ? '<button type="button" class="chipbtn" id="olOff">Stop showing them</button>' : '') + '<span class="hint" id="olMsg">' + esc(olStatus()) + '</span></div>' +
+      '<p class="hint">Anyone with this link can see your calendar, so don’t share it. To cut it off, go back to Publish a calendar in Outlook and click <b>Unpublish</b>.</p></div></div>';
+    el.hidden = false;
+    $('#olGo').onclick = () => {
+      const v = $('#olUrl').value.trim();
+      if (!/^(https|webcals?):\/\/(outlook\.(office365|office|live)\.com|calendar\.google\.com)\//i.test(v)) { $('#olMsg').textContent = 'Paste the ICS link from Outlook (it starts with https://outlook…).'; return; }
+      olData = { url: v, at: 0, items: [] }; outlookSave(); $('#olMsg').textContent = 'Reading your calendar…'; refreshOutlook(true);
+    };
+    if ($('#olOff')) $('#olOff').onclick = () => { olData = null; outlookSave(); closeSheet(); renderMain(); toast('Outlook meetings are no longer shown'); };
+  }
+  const events = () => S.tasks.filter(t => isEvent(t) && taskInScope(t)).concat(holidayEvents(), outlookEvents());
+  const extHidden = (t, hide) => !!(t.holiday && (t.outlook ? hide.outlook : hide.hol)); // holidays and Outlook meetings can each be hidden from the legend
   // Dates (YYYY-MM-DD) on which an event happens between a and b, following its repeat.
   function occursIn(t, a, b) {
     const out = []; if (!t.due) return out;
@@ -1766,12 +1887,13 @@ button.ol-dot.folded { box-shadow: none; }
   }
   // ---- event colors: yearly = red, multi-day = purple, other events = blue (each can be overridden)
   const EVCOLORS = { red: '#d1453b', orange: '#d97706', amber: '#c99000', green: '#2f8f5b', teal: '#0f8b8d', blue: '#2f6fd6', purple: '#7c4dcc', pink: '#c2417f', gray: '#64748b' };
-  const TYPE_DEFAULTS = { yearly: 'red', event: 'blue', multi: 'purple', hol: 'green', note: 'amber' };
-  const TYPE_LABELS = { yearly: 'Yearly (birthdays)', event: 'Events', multi: 'Multi-day', hol: 'Holidays', note: 'Day notes' };
+  const TYPE_DEFAULTS = { yearly: 'red', event: 'blue', multi: 'purple', hol: 'green', note: 'amber', outlook: 'gray' };
+  const TYPE_LABELS = { yearly: 'Yearly (birthdays)', event: 'Events', multi: 'Multi-day', hol: 'Holidays', note: 'Day notes', outlook: 'Outlook meetings' };
   const tc = k => EVCOLORS[(S.settings.typeColors || {})[k]] || EVCOLORS[TYPE_DEFAULTS[k]];
   function applyTypeColors() { const st = document.documentElement.style; st.setProperty('--note-c', tc('note')); st.setProperty('--hol-c', tc('hol')); }
   const spanLen = t => (t.end && t.due && t.end > t.due) ? D.diffDays(D.fromISO(t.end), D.fromISO(t.due)) : 0;
   function eventColor(t) {
+    if (t.outlook) return tc('outlook');
     if (t.holiday) return tc('hol');
     if (t.color && EVCOLORS[t.color]) return EVCOLORS[t.color];
     if (t.recur && t.recur.freq === 'year') return tc('yearly');
@@ -2288,7 +2410,8 @@ button.ol-dot.folded { box-shadow: none; }
     const occ = opts.occ || t.due, meta = [], L = spanLen(t);
     if (occ && L) meta.push('<span>' + I.cal + esc(D.dueLabel(t.due)) + ' \u2192 ' + esc(D.dueLabel(t.end)) + ' (' + (L + 1) + ' days)</span>');
     else if (occ) meta.push('<span class="' + (occ === todayISO() ? 'today' : '') + '">' + I.cal + esc(D.dueLabel(occ)) + (t.time ? ' ' + D.fmtTime(t.time) : '') + '</span>');
-    if (t.holiday) meta.push('<span>' + HOL_COUNTRIES[t.country || 'ae'] + ' public holiday' + (t.expected ? ' \u00b7 expected, may shift with the moon sighting' : '') + '</span>');
+    if (t.outlook) meta.push('<span>' + (t.until ? 'until ' + esc(D.fmtTime(t.until.slice(0, 5))) + esc(t.until.slice(5)) + ' \u00b7 ' : '') + 'Outlook' + (t.free ? ' \u00b7 free' : '') + '</span>' + (t.loc ? '<span>' + esc(t.loc) + '</span>' : ''));
+    else if (t.holiday) meta.push('<span>' + HOL_COUNTRIES[t.country || 'ae'] + ' public holiday' + (t.expected ? ' \u00b7 expected, may shift with the moon sighting' : '') + '</span>');
     if (t.recur) meta.push('<span>' + I.repeat + esc(D.recurText(t.recur)) + '</span>');
     if (t.reminder) meta.push('<span>' + I.bell + esc(D.reminderLabel(t.reminder)) + '</span>');
     if (t.notes) meta.push('<span>' + I.note + 'Note</span>');
@@ -2526,7 +2649,7 @@ button.ol-dot.folded { box-shadow: none; }
     const byDay = {}, spans = [];
     const add = (iso, item) => { (byDay[iso] = byDay[iso] || []).push(item); };
     const hide = S.settings.calHide || {};
-    for (const ev of events()) { if (ev.holiday && hide.hol) continue; spansIn(ev, startISO, endISO).forEach(sp => { if (spanLen(ev)) { if (!hide.multi || ev.holiday) spans.push(sp); } else if (sp.s >= startISO) add(sp.s, { t: ev, kind: 'event' }); }); }
+    for (const ev of events()) { if (extHidden(ev, hide)) continue; spansIn(ev, startISO, endISO).forEach(sp => { if (spanLen(ev)) { if (!hide.multi || ev.holiday) spans.push(sp); } else if (sp.s >= startISO) add(sp.s, { t: ev, kind: 'event' }); }); }
     for (const t of open()) {
       if (!t.due) continue;
       if (t.due >= startISO && t.due <= endISO) add(t.due, { t, kind: 'task' });
@@ -2547,7 +2670,7 @@ button.ol-dot.folded { box-shadow: none; }
     let h = '<div class="cal-bar"><button type="button" class="cal-title" data-menu="jump:" title="Jump to a month">' + ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m] + ' ' + y + I.chev + '</button>' +
       '<button type="button" class="iconbtn" data-cal="-1" aria-label="Previous month">' + I.left + '</button><button type="button" class="chipbtn" data-cal="0">Today</button><button type="button" class="iconbtn" data-cal="1" aria-label="Next month">' + I.right + '</button>' +
       '<span class="cal-legend"><span class="lgs"><i style="background:' + tc('yearly') + '"></i>Yearly</span><span class="lgs"><i style="background:' + tc('event') + '"></i>Event</span>' +
-      lg('multi', tc('multi'), 'Multi-day') + lg('note', '', 'Day note', 'lg-note') + (Object.values(holSettings()).some(Boolean) ? lg('hol', tc('hol'), 'Holiday') : '') + '<span class="lgs"><i class="lt"></i>Task</span></span></div>' +
+      lg('multi', tc('multi'), 'Multi-day') + lg('note', '', 'Day note', 'lg-note') + (Object.values(holSettings()).some(Boolean) ? lg('hol', tc('hol'), 'Holiday') : '') + (olOn() ? lg('outlook', tc('outlook'), 'Outlook') : '') + '<span class="lgs"><i class="lt"></i>Task</span></span></div>' +
       '<div class="calwrap"><div class="cal-head">' + [0, 1, 2, 3, 4, 5, 6].map(i => '<div class="cal-dow">' + D.WD_LONG[(WS + i) % 7].slice(0, 3) + '</div>').join('') + '</div><div class="cal-weeks">';
     for (let w = 0; w < WEEKS; w++) {
       const ws = D.addDays(start, 7 * w), wsISO = D.toISO(ws), weISO = D.toISO(D.addDays(ws, 6));
@@ -2593,7 +2716,7 @@ button.ol-dot.folded { box-shadow: none; }
     const hide = S.settings.calHide || {}, LANES = 2, MAXCH = 3;
     for (let w = 0; w < WEEKS; w++) {
       const ws = D.addDays(start, 7 * w), wsISO = D.toISO(ws), weISO = D.toISO(D.addDays(ws, 6));
-      const wk = spans.filter(sp => sp.s <= weISO && sp.e >= wsISO && !(sp.t.holiday && hide.hol)).map(sp => ({ sp, c0: Math.max(0, D.diffDays(D.fromISO(sp.s), ws)), c1: Math.min(6, D.diffDays(D.fromISO(sp.e), ws)) }))
+      const wk = spans.filter(sp => sp.s <= weISO && sp.e >= wsISO && !extHidden(sp.t, hide)).map(sp => ({ sp, c0: Math.max(0, D.diffDays(D.fromISO(sp.s), ws)), c1: Math.min(6, D.diffDays(D.fromISO(sp.e), ws)) }))
         .sort((x, z) => x.c0 - z.c0 || (z.c1 - z.c0) - (x.c1 - x.c0));
       const laneEnd = [], hidden = [0, 0, 0, 0, 0, 0, 0];
       wk.forEach(x => { let l = laneEnd.findIndex(e => e < x.c0); if (l < 0) { l = laneEnd.length; laneEnd.push(-1); } laneEnd[l] = x.c1; x.lane = l; if (l >= LANES) for (let c = x.c0; c <= x.c1; c++) hidden[c]++; });
@@ -2619,8 +2742,8 @@ button.ol-dot.folded { box-shadow: none; }
     const tasksDue = S.tasks.filter(t => !t.type && t.due === pick && taskInScope(t)).sort((a, b) => (a.done - b.done) || (a.time || '99').localeCompare(b.time || '99'));
     const ghosts = (byDay[pick] || []).filter(x => x.kind === 'task' && x.ghost).map(x => x.t);
     const skips = (byDay[pick] || []).filter(x => x.kind === 'skip').map(x => x.t);
-    const rows = di.spans.filter(sp => !hide.multi || sp.t.holiday).filter(sp => !(sp.t.holiday && hide.hol)).map(sp => eventRow(sp.t, { occ: sp.s })).join('') +
-      di.singles.filter(t => !(t.holiday && hide.hol)).map(t => eventRow(t, { occ: pick })).join('') +
+    const rows = di.spans.filter(sp => !hide.multi || sp.t.holiday).filter(sp => !extHidden(sp.t, hide)).map(sp => eventRow(sp.t, { occ: sp.s })).join('') +
+      di.singles.filter(t => !extHidden(t, hide)).map(t => eventRow(t, { occ: pick })).join('') +
       tasksDue.map(t => taskRow(t)).join('') +
       ghosts.map(t => '<div class="task ghostrow" data-id="' + t.id + '"><span class="check ghostcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span>' + I.repeat + 'Repeats' + (t.time ? ' · ' + D.fmtTime(t.time) : '') + '</span></div></div></div>').join('') +
       skips.map(t => '<div class="task skiprow" data-id="' + t.id + '"><span class="check skipcheck"></span><div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + esc(unbr(t.title)) + '</div><div class="tmeta"><span class="skiplbl">Skipped</span></div></div></div>').join('');
@@ -2913,7 +3036,7 @@ button.ol-dot.folded { box-shadow: none; }
         const body = isWaiting(t) && nudgeRem(t) ? 'Waiting on ' + t.waiting.who + ' since ' + shortDate(t.waiting.since) + '. Time to follow up.' : t.expFor && t.due ? (t.due === todayISO() ? 'Expires today' : 'Expires ' + D.dueLabel(t.due) + ' (' + D.diffDays(D.fromISO(t.due), D.fromISO(todayISO())) + ' days)') : (t.due ? (isEvent(t) ? '' : 'Due ') + D.dueLabel(t.due) + (t.time ? ' ' + D.fmtTime(t.time) : '') : 'Reminder') + (S.lists.length > 1 ? ' · ' + ((listById(t.listId) || {}).name || '') : '');
         const plain = () => { const n = new Notification(plainLinks(t.title), { body, tag: t.id }); n.onclick = () => { window.focus(); ui.selected = t.id; render(); }; };
         // Phones only allow notifications through the service worker; the same tag means a push for this reminder is replaced, not doubled
-        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id, at: t.remindedFor || null } })).catch(() => { try { plain(); } catch (e) { } });
+        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id, at: t.remindedFor || null }, actions: (isEvent(t) || t.type ? [] : [{ action: 'done', title: 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) })).catch(() => { try { plain(); } catch (e) { } });
         else plain();
       }
     } catch (e) { }
@@ -2980,13 +3103,14 @@ button.ol-dot.folded { box-shadow: none; }
         [['system', IS_ANDROID ? 'Match phone' : 'Match Windows'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => '<button type="button" data-mode="' + k + '" aria-pressed="' + (mode === k) + '">' + n + '</button>').join('') + '</div>' +
         '<div class="mlabel">Week starts on</div><div class="seg" role="group" aria-label="Week starts on">' + [[0, 'Sunday'], [1, 'Monday']].map(([k, n]) => '<button type="button" data-wstart="' + k + '" aria-pressed="' + ((S.settings.weekStart === 1 ? 1 : 0) === k) + '">' + n + '</button>').join('') + '</div>' +
         '<div class="mlabel">Public holidays (updated automatically)</div>' + Object.entries(HOL_COUNTRIES).map(([c, n]) => '<button type="button" data-holc="' + c + '">' + I.cal + n + ': ' + (holSettings()[c] ? '<b>shown</b>' : 'hidden (click to show)') + '</button>').join('') +
-        '<div class="mlabel">Calendar colors</div><div class="typecolors">' + Object.keys(TYPE_DEFAULTS).map(k => '<div class="tcrow"><span>' + TYPE_LABELS[k] + '</span><span class="tcsw">' + Object.entries(EVCOLORS).map(([cn, cv]) => '<button type="button" class="tcdot' + (tc(k) === cv ? ' on' : '') + '" data-tcolor="' + k + ':' + cn + '" style="background:' + cv + '" aria-label="' + TYPE_LABELS[k] + ' ' + cn + '" title="' + cn + '"></button>').join('') + '</span></div>').join('') + '</div>' +
+        '<div class="mlabel">Calendar colors</div><div class="typecolors">' + Object.keys(TYPE_DEFAULTS).filter(k => k !== 'outlook' || olOn()).map(k => '<div class="tcrow"><span>' + TYPE_LABELS[k] + '</span><span class="tcsw">' + Object.entries(EVCOLORS).map(([cn, cv]) => '<button type="button" class="tcdot' + (tc(k) === cv ? ' on' : '') + '" data-tcolor="' + k + ':' + cn + '" style="background:' + cv + '" aria-label="' + TYPE_LABELS[k] + ' ' + cn + '" title="' + cn + '"></button>').join('') + '</span></div>').join('') + '</div>' +
         '<div class="mlabel">Reminders</div><button type="button" data-mact="autorem">' + I.bell + (S.settings.autoRemind ? 'On: remind at a task’s due time' : 'Off: only remind when I set one') + '</button>' +
-        '<button type="button" data-mact="bdayrem">' + I.bell + (S.settings.bdayRemind === false ? 'Birthdays & anniversaries: no automatic reminder' : 'Birthdays & anniversaries: remind the day before, 9am') + '</button>' +
+        '<button type="button" data-mact="bdayrem">' + I.bell + (S.settings.bdayRemind === false ? 'Birthdays & anniversaries: no automatic reminder' : 'Birthdays & anniversaries: remind the day before, 6am') + '</button>' +
         '<button type="button" data-mact="notif">' + I.bell + esc(notifStatus()) + '</button>' +
         '<button type="button" data-mact="donesound">' + I.check + (S.settings.doneSound === false ? 'Sound when a task is done: off' : 'Sound when a task is done: on') + '</button>' +
         '<div class="mlabel">Your data</div>' + (syncAvailable() ? (sync.user ? '<button type="button" data-mact="signout">' + I.x + 'Sign out of sync (' + esc(sync.user.email || '') + ')</button>' : '<button type="button" data-mact="signin">' + I.repeat + 'Turn on sync\u2026</button>') : '') +
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
+        '<button type="button" data-mact="outlook">' + I.cal + (olOn() ? 'Outlook meetings: shown\u2026' : 'Show my Outlook meetings\u2026') + '</button>' +
         '<button type="button" data-mact="icsimport">' + I.cal + 'Import a calendar file (.ics)\u2026</button>' +
         (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
     } else if (type === 'task') {
@@ -3582,7 +3706,12 @@ button.ol-dot.folded { box-shadow: none; }
 
     // refresh "today" at midnight / when the window regains focus
     window.addEventListener('focus', () => { render(); checkReminders(); });
-    window.addEventListener('storage', e => { if (e.key === KEY && e.newValue) { try { S = JSON.parse(e.newValue); refreshAfterRemote(); } catch (err) { } } if (e.key === SYNC_KEY) loadSyncMeta(); });
+    if (STORE.bc) STORE.bc.onmessage = async e => { // another Tally window on this device saved
+      const keys = (e.data && e.data.keys) || [];
+      if (keys.includes(KEY) && !STORE.queue.has(KEY)) { const raw = await readStored(KEY); if (raw) { try { S = fromRaw(raw); dataVer++; refreshAfterRemote(); } catch (err) { } } }
+      if (keys.includes(SYNC_KEY) && !STORE.queue.has(SYNC_KEY)) loadSyncMeta();
+    };
+    window.addEventListener('storage', e => { if (e.key === KEY && e.newValue && STORE.off) { try { S = JSON.parse(e.newValue); refreshAfterRemote(); } catch (err) { } } if (e.key === SYNC_KEY && STORE.off) loadSyncMeta(); });
 
     $('#alarm').addEventListener('click', e => {
       const b = e.target.closest('[data-al]'); if (!b) return;
@@ -3722,10 +3851,10 @@ button.ol-dot.folded { box-shadow: none; }
   /* ---------- sync (Supabase) ---------- */
   const CFG = window.TALLY_CONFIG || {};
   const SYNC_KEY = 'tally.sync.v1';
-  const sync = { client: null, user: null, state: 'off', detail: '', channel: null, timer: null, busy: false, meta: { uid: null, shadow: {}, lastPull: null } };
+  const sync = { client: null, user: null, state: 'off', detail: '', channel: null, timer: null, busy: false, okDel: new Set(), asking: false, meta: { uid: null, shadow: {}, lastPull: null } };
   function syncAvailable() { return !!(window.supabase && window.supabase.createClient && CFG.supabaseUrl && CFG.supabaseKey && !/claude/.test(location.hostname)); }
-  function loadSyncMeta() { try { const m = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); if (m && m.shadow) sync.meta = m; } catch (e) { } }
-  function saveSyncMeta() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync.meta)); } catch (e) { } }
+  async function loadSyncMeta() { try { const m = JSON.parse((await readStored(SYNC_KEY)) || 'null'); if (m && m.shadow) sync.meta = m; } catch (e) { } }
+  function saveSyncMeta() { storeLater(SYNC_KEY, () => JSON.stringify(sync.meta)); }
   const ser = o => JSON.stringify(o, (k, v) => k === 'remindedFor' ? undefined : v);
   function itemsOf(st) {
     const m = {}, tr = st.trash || { tasks: [], lists: [] };
@@ -3755,11 +3884,17 @@ button.ol-dot.folded { box-shadow: none; }
   async function push() {
     if (!syncReady()) return;
     if (sync.busy) { schedulePush(); return; }
-    const ch = pendingChanges();
+    let ch = pendingChanges();
     if (!ch.length) { if (sync.state !== 'error') setSync('synced'); return; }
     if (!navigator.onLine) { setSync('offline'); return; }
     sync.busy = true; setSync('syncing');
     try {
+      // First take in anything another device saved meanwhile, so it's merged rather than overwritten
+      applyRemote(await pullRows(sync.meta.lastPull));
+      ch = pendingChanges();
+      // A lot deleted at once (more than a quarter of everything) is more likely a problem on this device than a choice: ask first
+      const dels = ch.filter(c => c.deleted && !sync.okDel.has(c.k)), total = Object.values(sync.meta.shadow).filter(v => v !== '~').length;
+      if (dels.length > 25 && dels.length > total / 4) { ch = ch.filter(c => !dels.includes(c)); if (!sync.asking) setTimeout(() => askBigDelete(dels.map(c => c.k)), 0); }
       for (let i = 0; i < ch.length; i += 400) {
         const part = ch.slice(i, i + 400);
         const rows = part.map(c => ({ user_id: sync.user.id, id: c.k, kind: c.k.slice(0, c.k.indexOf(':')), data: c.deleted ? null : JSON.parse(c.j), deleted: !!c.deleted }));
@@ -3771,6 +3906,18 @@ button.ol-dot.folded { box-shadow: none; }
       setSync('synced');
     } catch (err) { setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err)); }
     finally { sync.busy = false; }
+  }
+  async function askBigDelete(keys) {
+    sync.asking = true;
+    try {
+      const choice = await askChoice('Delete ' + keys.length + ' items everywhere?', 'This device is about to delete <b>' + keys.length + '</b> items from your account, and from your other devices. If you didn’t mean to, get them back.',
+        [['back', 'Get them back', 'Recommended if you didn’t just delete a lot. Restores them from your account.'], ['yes', 'Yes, delete them everywhere', 'Use this if you just emptied Recently deleted or removed a big list.']]);
+      if (choice === 'yes') { keys.forEach(k => sync.okDel.add(k)); schedulePush(); return; }
+      keys.forEach(k => { delete sync.meta.shadow[k]; });
+      sync.meta.lastPull = null; saveSyncMeta();
+      applyRemote(await pullRows(null)); toast('Got them back from your account');
+    } catch (e) { toast('Couldn’t get them back yet: ' + (e.message || e)); }
+    finally { sync.asking = false; }
   }
   async function pullRows(since) {
     let all = [], from = 0;
@@ -3790,21 +3937,37 @@ button.ol-dot.folded { box-shadow: none; }
       if (r.server_updated && (!sync.meta.lastPull || r.server_updated > sync.meta.lastPull)) sync.meta.lastPull = r.server_updated;
       const k = r.id, j = r.deleted ? '~' : ser(r.data);
       if (sync.meta.shadow[k] === j) continue;
-      if (pend.has(k)) continue; // this computer has a newer unsent edit; it will win when pushed
       const kind = k.slice(0, k.indexOf(':')), id = k.slice(k.indexOf(':') + 1);
       const live = kind === 'task' ? S.tasks : kind === 'list' ? S.lists : kind === 'group' ? S.groups : null;
       if (!live) continue;
       const bin = kind === 'task' ? S.trash.tasks : kind === 'list' ? S.trash.lists : null;
       let prev = live.find(x => x.id === id) || (bin && bin.find(x => x.id === id));
+      let obj = r.deleted ? null : r.data;
+      if (pend.has(k)) {
+        // Both this device and another changed it: keep each side's changes, field by field (this device wins where both changed the same field)
+        const base = sync.meta.shadow[k];
+        if (!obj || !prev || !base || base === '~') continue; // deleted on one side: this device's version stays and is sent
+        obj = mergeFields(JSON.parse(base), prev, obj);
+      }
       const li = live.findIndex(x => x.id === id); if (li >= 0) live.splice(li, 1);
       if (bin) { const bi = bin.findIndex(x => x.id === id); if (bi >= 0) bin.splice(bi, 1); }
-      if (!r.deleted) { const obj = r.data; if (kind === 'task' && prev) obj.remindedFor = prev.remindedFor; ((obj.deletedAt && bin) ? bin : live).push(obj); }
-      if (kind === 'task' && (r.deleted || !r.data || r.data.done || r.data.deletedAt || (prev && prev.remindedFor && effectiveReminder(prev) === prev.remindedFor && effectiveReminder(r.data) !== prev.remindedFor))) { const ai = alarmQueue.indexOf(id); if (ai >= 0) { alarmQueue.splice(ai, 1); setTimeout(renderAlarm, 0); } closeLocalNotif(id); }
+      if (obj) { if (kind === 'task' && prev) obj.remindedFor = prev.remindedFor; ((obj.deletedAt && bin) ? bin : live).push(obj); }
+      if (kind === 'task' && (!obj || obj.done || obj.deletedAt || (prev && prev.remindedFor && effectiveReminder(prev) === prev.remindedFor && effectiveReminder(obj) !== prev.remindedFor))) { const ai = alarmQueue.indexOf(id); if (ai >= 0) { alarmQueue.splice(ai, 1); setTimeout(renderAlarm, 0); } closeLocalNotif(id); }
       changed = true;
       sync.meta.shadow[k] = j;
     }
     saveSyncMeta();
     if (changed) { persistLocal(); refreshAfterRemote(); }
+  }
+  // Three-way merge of one item: base = the last version both devices agreed on
+  function mergeFields(base, mine, theirs) {
+    const out = {}, same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    new Set(Object.keys(mine).concat(Object.keys(theirs))).forEach(f => {
+      if (f === 'remindedFor') return;
+      const v = same(mine[f], base[f]) ? theirs[f] : mine[f]; // unchanged here → take theirs; changed here → keep mine
+      if (v !== undefined) out[f] = v;
+    });
+    return out;
   }
   function refreshAfterRemote() {
     rollEvents();
@@ -3843,9 +4006,9 @@ button.ol-dot.folded { box-shadow: none; }
           [['replace', 'Use my synced tasks', 'Recommended. This computer switches to what’s in your account.'], ['merge', 'Combine both', 'Adds this computer’s tasks to your account too.']]);
         else choice = await askChoice('Start syncing', 'Your account is empty. This computer has <b>' + localN + '</b> task' + (localN === 1 ? '' : 's') + '.',
           [['upload', 'Upload this computer’s tasks', 'Use this if you’ve been adding real tasks here.'], ['empty', 'Start with an empty list', 'Clears the sample tasks. Good for a fresh start.']]);
-        loadSyncMeta();
+        await loadSyncMeta();
         if (sync.meta.uid === user.id) { // another Tally window on this computer already finished setup
-          try { S = JSON.parse(localStorage.getItem(KEY)) || S; } catch (e) { }
+          try { const raw = await readStored(KEY); if (raw) S = fromRaw(raw); } catch (e) { }
           refreshAfterRemote(); await refreshPull(); subscribeLive(); setSync('synced'); return;
         }
         snapshot();
@@ -3916,7 +4079,6 @@ button.ol-dot.folded { box-shadow: none; }
   let linkPoll = null;
   function waitForLinkSignIn() { clearInterval(linkPoll); let n = 0; linkPoll = setInterval(() => { if (sync.user || ++n > 200) { clearInterval(linkPoll); return; } checkForSession(); }, 3000); }
   async function startSync() {
-    loadSyncMeta();
     if (!syncAvailable()) { setSync('off'); return; }
     try {
       sync.client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
@@ -5914,10 +6076,12 @@ button.ol-dot.folded { box-shadow: none; }
       if (e.target.closest('[data-icsgo]')) doIcsImport();
     });
     $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="icsimport"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openIcsPicker(); } }, true);
+    $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="outlook"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openOutlook(); } }, true);
   }
 
   /* ---------- boot ---------- */
-  loadSyncMeta(); S = load(); persistLocal(); applyTheme(); applyTypeColors();
+  (async () => {
+  await loadStored(); persistLocal(); applyTheme(); applyTypeColors();
   ui.view = startView(); // Settings → Pages & swiping
   bind(); if (isPhone()) $('#qa').placeholder = 'Add a task'; updatePreview(); render();
   const runReminders = () => loadPushed().then(checkReminders, checkReminders);
@@ -5929,11 +6093,23 @@ button.ol-dot.folded { box-shadow: none; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) runReminders(); });
   // Opened from a notification: show that task
   const openTask = id => { if (!id || !taskById(id)) return; ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };
-  try { const q = new URLSearchParams(location.search).get('open'); if (q) { history.replaceState(null, '', location.pathname); openTask(q); setTimeout(() => openTask(q), 2500); } } catch (e) { }
+  // The Done / Snooze buttons on a notification
+  function notifAction(act, id) {
+    const t = taskById(id); if (!t) return;
+    if (act === 'done') { if (!t.done && !t.type) completeTask(t); else toast('Already done'); }
+    else if (act === 'snooze') { const d = new Date(Date.now() + 60 * 60000); d.setSeconds(0, 0); snapshot(); clearReminder(t); t.reminder = D.toLocalDT(d); t.remRule = null; t.remindedFor = null; save(); render(); toast('Snoozed until ' + D.fmtTime(t.reminder.slice(11)), true); }
+    const i = alarmQueue.indexOf(id); if (i >= 0) { alarmQueue.splice(i, 1); renderAlarm(); }
+  }
+  try {
+    const qs = new URLSearchParams(location.search), q = qs.get('open'), act = qs.get('act');
+    if (q) { history.replaceState(null, '', location.pathname); if (act) notifAction(act, q); else { openTask(q); setTimeout(() => openTask(q), 2500); } }
+  } catch (e) { }
   if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
     if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen);
+    if (e.data && e.data.tallyAct) notifAction(e.data.tallyAct, e.data.id);
     if (e.data && e.data.tallyClear) { const i = alarmQueue.indexOf(e.data.tallyClear); if (i >= 0) { alarmQueue.splice(i, 1); renderAlarm(); } } // dealt with on another device
   });
+  setTimeout(() => refreshOutlook(), 1500); setInterval(() => refreshOutlook(), 30 * 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOutlook(); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
   bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
@@ -5951,6 +6127,7 @@ button.ol-dot.folded { box-shadow: none; }
     autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000);
   if (/[?&]share=1/.test(location.search)) { history.replaceState(null, '', location.pathname); takeShared(); }
   startSync();
+  })(); // end of start-up (waits for the saved data)
 })();
 
 </script>

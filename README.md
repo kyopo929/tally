@@ -12,6 +12,8 @@ A personal to-do app to replace Microsoft To Do: lists in groups, quick add in p
 - Sync between computers via Supabase (sign in with an email link). Live updates, works offline and catches up.
 - Phone layout (≤600px wide): add box docked at the bottom, compact month calendar with dots and the picked day's agenda (swipe to change months), full-screen task panel, menus as bottom sheets, Back button closes panels.
 - Reminders when the app is closed: web push. `api/push.js` sends them; Supabase's pg_cron calls it every minute. One-time setup at `/setup-push.html` (makes the keys in your browser, gives the Vercel values and the Supabase SQL). Without that setup, reminders still work while the app is open.
+- Outlook meetings in the calendar (read-only, per device): Settings → Show my Outlook meetings → paste Outlook's published ICS link. `api/outlook.js` reads it (Outlook/Google links only) and `api/_outlook.js` expands repeats, skipped and moved meetings, and Windows time-zone names.
+- Dismissing a reminder on one device clears it on the others (`/api/push` `{dismiss}`); notifications have Done and Snooze 1 hour buttons.
 - Calendar link: Settings → Show tasks in Outlook or Google. `/feed/<token>.ics` (also `-work`/`-personal`) served by `api/feed.js`; needs `supabase/feed.sql` run once.
 
 Live app: https://tally-ntqo.vercel.app (Vercel redeploys on every push to `main`).
@@ -27,6 +29,8 @@ A copy needs its own Supabase project. In Vercel → Settings → Environment Va
 
 `vendor/supabase.js` is @supabase/supabase-js 2.118.0 (UMD build). `vendor/pdf.min.mjs` + `pdf.worker.min.mjs` are pdfjs-dist 6.4.299 (Apache-2.0), used for PDF previews. It loads only when needed. `vendor/ocr/` is tesseract.js 7 + tesseract.js-core 7 (Apache-2.0) with English `eng.traineddata` (4.0.0_best_int, uncompressed), used to read text in photos for search (computers only, in the background).
 
+Saving on the device: IndexedDB `tally-data` (keys `tally.v1` = your data, `tally.sync.v1` = sync bookkeeping), moved over from localStorage on first start. A failed save shows a red banner and retries. Edits made on two devices at once are merged field by field; a push that would delete more than a quarter of your items asks first.
+
 Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`tally-files`) on each computer and in Supabase Storage at `attachments/<user id>/<file id>` (`_t` = preview). Photos are resized to 2400px on the way in.
 
 ## Keyboard
@@ -34,7 +38,8 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 
 ## Tests
 `node tests/parser.test.js` checks the quick-add language (dates, repeats, tags, start dates, reminders).
-`node tests/push.test.js` checks which reminders the server sends and when (time zones, per-device settings, no repeats).
+`node tests/push.test.js` checks which reminders the server sends and when (time zones, per-device settings, no repeats, clearing on other devices).
+`node tests/outlook.test.js` checks reading Outlook's calendar (repeats, exceptions, time zones).
 
 ## Notes, Documents, locks, backups
 - Notes (`type:'note'`) and Documents (`type:'doc'`: holder, number, expires) are task rows. Any item can have `attachments`.

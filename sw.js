@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION when files change.
-const VERSION = 'tally-v79';
+const VERSION = 'tally-v80';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './vendor/supabase.js', './config.js'];
 const PUSH_LOG = 'tally-push-log'; // reminders already shown by a push, so the app doesn't show them again
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
@@ -18,11 +18,19 @@ self.addEventListener('fetch', e => {
     return Response.redirect('./?share=1', 303);
   })());
 });
-// Network first so updates show up; fall back to cache when offline.
+// Network first so updates show up. On a weak signal, wait at most 3 seconds, then open the saved copy
+// (the download carries on in the background, so the next start has the newest version). Offline: the saved copy.
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin || u.pathname.startsWith('/api/') || u.pathname.startsWith('/feed/')) return;
-  e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request, { ignoreSearch: u.pathname === '/' || u.pathname.endsWith('/index.html') })));
+  const cached = () => caches.match(e.request, { ignoreSearch: u.pathname === '/' || u.pathname.endsWith('/index.html') });
+  const net = fetch(e.request).then(r => { if (r.ok) { const copy = r.clone(); const w = caches.open(VERSION).then(c => c.put(e.request, copy)); try { e.waitUntil(w); } catch (x) { } } return r; });
+  e.respondWith(new Promise(resolve => {
+    let done = false;
+    const give = r => { if (!done && r) { done = true; resolve(r); } };
+    const timer = setTimeout(() => cached().then(give), 3000);
+    net.then(r => { clearTimeout(timer); give(r); }, () => { clearTimeout(timer); cached().then(r => r ? give(r) : give(Response.error())); });
+  }));
 });
 
 // Reminders sent by the server while Tally is closed
@@ -53,7 +61,8 @@ self.addEventListener('push', e => {
     await self.registration.showNotification(d.title || 'Reminder', {
       body: d.body || '', tag: d.id || undefined, renotify: true,
       icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png',
-      data: { id: d.id || null, at: d.at || null }, timestamp: Date.now()
+      data: { id: d.id || null, at: d.at || null }, timestamp: Date.now(),
+      actions: d.id ? (d.event ? [] : [{ action: 'done', title: 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) : []
     });
   })());
 });
@@ -79,7 +88,9 @@ self.addEventListener('notificationclick', e => {
   const rep = reportDismiss(e.notification);
   e.waitUntil(Promise.all([rep, (async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (wins.length) { const w = wins[0]; try { await w.focus(); } catch (x) { } if (id) w.postMessage({ tallyOpen: id }); return; }
-    await self.clients.openWindow('./' + (id ? '?open=' + encodeURIComponent(id) : ''));
+    // Done / Snooze buttons on the notification: Tally does it (opening if needed) and shows Undo
+    const act = e.action === 'done' || e.action === 'snooze' ? e.action : '';
+    if (wins.length) { const w = wins[0]; try { await w.focus(); } catch (x) { } if (id) w.postMessage(act ? { tallyAct: act, id } : { tallyOpen: id }); return; }
+    await self.clients.openWindow('./' + (id ? '?' + (act ? 'act=' + act + '&' : '') + 'open=' + encodeURIComponent(id) : ''));
   })()]));
 });
