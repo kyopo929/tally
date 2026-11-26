@@ -2948,21 +2948,22 @@
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
     let html = '<div class="ntabs ptabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
     const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button>' + (extra || '') + '<span class="spacer"></span>' +
-      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="ok">Approve</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
+      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="ok">Approve</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
       '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
     if (tab === 'runs') html += renderPayroll(all);
     else if (tab === 'fc') html += renderForecast(all);
     else {
       html += bar();
       let xs = payFilter(tab, all);
-      if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.check, x.p.run, x.p.note, x.p.chase, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
+      if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount, or a date like 2026-11" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (/^\d{4}(-\d{2}){0,2}$/.test(q)) xs = xs.filter(x => (x.p.date || '').startsWith(q)); else if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.check, x.p.run, x.p.note, x.p.chase, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
         runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · pay date ' + esc(payDate(rs[0].p.date)) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
         xs = loose;
       }
-      if (xs.length) html += '<div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
+      ui.payShown = xs.map(x => x.t.id);
+      if (xs.length) html += '<div class="pselall"><label><input type="checkbox" data-payselall="1"' + (xs.every(x => ui.paySel.has(x.t.id)) ? ' checked' : '') + '> Select all ' + xs.length + '</label></div><div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
       else if (!(tab === 'topay' && payFilter('topay', all).length)) html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, payrolls you set up, and Pending or Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
     }
     const toPay = payFilter('topay', all);
@@ -3321,12 +3322,14 @@
   /* ---- import rows from the cash-flow sheet ---- */
   // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows become To pay; the rest are already paid.
   function parseSheetRows(text) {
-    const out = [], soon = D.toISO(D.addDays(new Date(), 7)); let lastDate = null, lastVendor = '', ctx = null; out.skipped = 0;
+    const out = [], soon = D.toISO(D.addDays(new Date(), 7)); let lastDate = null, lastVendor = '', ctx = null, plan = false; out.skipped = 0;
     String(text || '').split(/\r?\n/).forEach(line => {
       if (!line.trim()) return;
       const c = line.split('\t').map(x => x.trim());
       if (/^date$/i.test(c[0])) return; // header
       const dt = sheetDate(c[0]);
+      if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?$/i.test(c[0])) plan = true; // a month heading starts the sheet's forecast: the rest are plans, not payments
+      if (plan) { if (isAmt(c[5]) || isAmt(c[6])) out.skipped++; return; }
       if (c[0]) { ctx = dt ? (dt > soon ? 'skip' : 'date') : /^(pending|due)\b/i.test(c[0]) ? 'pend' : 'skip'; if (dt) lastDate = dt; } // a month heading like "SEP", or a date more than a week ahead, is a forecast: skipped
       const pending = ctx === 'pend';
       if (!ctx || ctx === 'skip') { if (isAmt(c[5]) || isAmt(c[6])) out.skipped++; return; }
@@ -3378,7 +3381,7 @@
     const go = () => needVault().then(ok => { if (ok) render(); });
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
@@ -3394,6 +3397,11 @@
       if (d.payedit) return openPayForm(d.payedit);
       if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
+      if (d.payselall) { const ids = ui.payShown || []; if (b.checked) ids.forEach(id => ui.paySel.add(id)); else ids.forEach(id => ui.paySel.delete(id)); renderMain(); return; }
+      if (d.paydelsel) {
+        if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Click again to delete ' + ui.paySel.size; return; }
+        const xs = S.tasks.filter(t => isPay(t) && ui.paySel.has(t.id)); snapshot(); xs.forEach(t => trashTask(t)); ui.paySel = new Set(); save(); render(); toast(xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' moved to Recently deleted', true); return;
+      }
       if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
       if (d.runmore) { ui.runLimit = (ui.runLimit || 12) + 24; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
@@ -3403,7 +3411,7 @@
       if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && x.p.status !== 'paid' && (d.to !== 'ok' || x.p.status === 'req')), d.to); return; }
       if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
     });
-    $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
+    $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; ui.paySel = new Set(); const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
     $('#content').addEventListener('change', async e => {
       if (e.target.id === 'fcMonths') { ui.fcMonths = +e.target.value; renderMain(); }
       if (e.target.id === 'fcBal') { const v = e.target.value.trim(), n = toNum(v); if (!(await needVault())) return; await setPayCfg({ balance: v === '' ? null : n, balanceDate: todayISO() }); renderMain(); }
