@@ -1666,7 +1666,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
   const todayISO = () => D.toISO(new Date());
-  const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments'); // Payments section: original site only (api/_cfg.js)
+  const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments') && !/Android/i.test(navigator.userAgent || ''); // Payments section: original site only (api/_cfg.js), and not on the Android phone
   const isPay = t => !!t && t.type === 'payment';
   const COLORS = ['#2856c7', '#2a9d8f', '#d99100', '#c4372c', '#7b4fc9', '#3d8b37', '#d0559a', '#607089'];
 
