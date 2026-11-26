@@ -3630,11 +3630,24 @@
 
   /* ---- import rows from the cash-flow sheet ---- */
   // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows come in as Pending; the rest are already paid.
+  // Rows copied from Excel: tabs between cells, a new line between rows. A cell with line breaks inside comes wrapped in quotes ("" is a quote).
+  function tsvRows(text) {
+    const t = String(text || ''), rows = []; let row = [], cell = '', i = 0, q = false;
+    while (i < t.length) {
+      const ch = t[i];
+      if (q) { if (ch === '"') { if (t[i + 1] === '"') { cell += '"'; i += 2; continue; } q = false; i++; continue; } cell += ch; i++; continue; }
+      if (ch === '"' && cell === '') { q = true; i++; continue; }
+      if (ch === '\t') { row.push(cell); cell = ''; i++; continue; }
+      if (ch === '\r' || ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; i += ch === '\r' && t[i + 1] === '\n' ? 2 : 1; continue; }
+      cell += ch; i++;
+    }
+    if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+    return rows;
+  }
   function parseSheetRows(text) {
     const out = [], soon = D.toISO(D.addDays(new Date(), 7)); let lastDate = null, lastVendor = '', ctx = null, plan = false; out.skipped = 0;
-    String(text || '').split(/\r?\n/).forEach(line => {
-      if (!line.trim()) return;
-      const c = line.split('\t').map(x => x.trim());
+    tsvRows(text).forEach(cells => {
+      const c = cells.map(x => x.replace(/\s*[\r\n]+\s*/g, ' ').trim()); if (!c.some(Boolean)) return; // a cell with line breaks becomes one line
       if (/^date$/i.test(c[0])) return; // header
       const dt = sheetDate(c[0]);
       if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?$/i.test(c[0])) plan = true; // a month heading starts the sheet's forecast: the rest are plans, not payments
