@@ -2918,6 +2918,12 @@
       '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
       '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
   }
+  // Order for lists and Excel: by date; on each date a person's lines stay together, regular pay first, then adjustments
+  function payOrder(xs) {
+    const pos = new Map(S.tasks.map((t, i) => [t.id, i])), at = x => pos.get(x.t.id) ?? 0, key = x => (x.p.date || '') + '|' + normName(x.p.payee); // the order they were added
+    const first = {}; xs.forEach(x => { const k = key(x), c = at(x) + (x.p.extra ? 1e9 : 0); if (!(k in first) || c < first[k]) first[k] = c; });
+    return xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || first[key(a)] - first[key(b)] || (a.p.extra ? 1 : 0) - (b.p.extra ? 1 : 0) || at(a) - at(b));
+  }
   const payTotal = xs => xs.reduce((s, x) => s + (x.p.status === 'paid' && (x.p.failed || x.p.twice) ? 0 : (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0)), 0); // a failed transfer or a row in both columns moved no money
   // Payrolls, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date), two (a 2-week payroll) }
   function payRuns(all) {
@@ -3011,7 +3017,7 @@
     runs.slice(0, ui.runLimit || 12).forEach(r => {
       const open = ui.payOpen === r.name, paid = r.all.filter(x => x.p.status === 'paid' && !x.p.failed).length, bad = r.all.filter(x => x.p.failed && !x.p.redone).length, added = r.all.length - r.xs.length;
       h += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(r.name) + '">' + I.chev + '<span class="pwho">' + esc(r.name) + '</span><span class="psub">Paid ' + esc(payDate(r.date)) + ' · ' + r.xs.length + ' people' + (added ? ' + ' + added + ' added' : '') + ' · ' + (paid === r.all.length ? 'all paid' : paid + ' paid') + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(r.all)) + '</span></button>' +
-        (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-paybasket="' + esc(r.name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(r.name) + '">Copy for Excel</button></div><div class="plist">' + r.all.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
+        (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-paybasket="' + esc(r.name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(r.name) + '">Copy for Excel</button></div><div class="plist">' + payOrder(r.all).map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
     });
     if (runs.length > (ui.runLimit || 12)) h += '<div class="more-wrap"><button type="button" class="chipbtn" data-runmore="1">Show older</button></div>';
     return h;
@@ -3023,7 +3029,7 @@
     const all = pays(), cfg = payCfg(), rate = cfg.rate || 3.67, runs = payRuns(all);
     if (kind !== 'next' && kind !== 'month' && kind !== 'blank') { // an existing payroll
       const r = runs.find(x => x.name === kind); if (!r) return null;
-      return { name: r.name, date: r.date, edit: r.name, rows: r.all.map(x => ({ id: x.t.id, on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: x.p.extra ? x.p.what : '', info: x.p.status === 'paid' ? 'Paid' : '' })) };
+      return { name: r.name, date: r.date, edit: r.name, rows: payOrder(r.all).map(x => ({ id: x.t.id, on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: x.p.extra ? x.p.what : '', info: x.p.status === 'paid' ? 'Paid' : '' })) };
     }
     if (kind === 'blank') return { name: '', date: todayISO(), rows: [] };
     const carry = all.filter(x => x.p.run && x.p.failed && !x.p.redone).map(x => ({ carry: x.t.id, on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: (x.p.what || x.p.run) + ', ' + payDate(x.p.date) + ' payment did not go through', info: 'Didn’t go through' }));
@@ -3041,17 +3047,18 @@
     });
     if (!cfg.roster.length) (last ? last.xs : []).forEach(x => rows.push({ on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: '', info: '' }));
     else Object.values(lastPaid).forEach(p => { if (!seen.has(p.payee)) rows.push({ on: false, payee: p.payee, site: p.site, amount: p.amount, what: '', info: 'Not on the roster', warn: true }); });
-    return { name: nx ? nx.name : '', date: nx ? nx.date : todayISO(), rows: rows.concat(carry) };
+    carry.forEach(c => { const i = rows.findIndex(r => normName(r.payee) === normName(c.payee)); if (i >= 0) rows.splice(i + 1, 0, c); else rows.push(c); }); // right under the person
+    return { name: nx ? nx.name : '', date: nx ? nx.date : todayISO(), rows };
   }
   function basketRowHtml(r, i) {
-    return '<tr data-bi="' + i + '"' + (r.on ? '' : ' class="off"') + (r.id ? ' data-id="' + r.id + '"' : '') + (r.carry ? ' data-carry="' + r.carry + '"' : '') + '>' +
+    return '<tr data-bi="' + i + '" class="' + (r.on ? '' : 'off') + (r.what ? ' badj' : '') + '"' + (r.id ? ' data-id="' + r.id + '"' : '') + (r.carry ? ' data-carry="' + r.carry + '"' : '') + '>' +
       '<td><input type="checkbox" class="b-on"' + (r.on ? ' checked' : '') + ' aria-label="Include"></td>' +
       '<td><input class="ctl b-payee" value="' + esc(r.payee) + '" aria-label="Name"></td>' +
       '<td><input class="ctl b-site" value="' + esc(r.site) + '" list="pfSites" aria-label="Project"></td>' +
       '<td><input class="ctl b-amt r" value="' + (r.amount === '' ? '' : money(r.amount)) + '" inputmode="decimal" aria-label="Amount"></td>' +
       '<td><input class="ctl b-what" value="' + esc(r.what) + '" placeholder="regular pay" aria-label="Note"></td>' +
       '<td class="b-info' + (r.warn ? ' warn' : '') + '">' + esc(r.info || '') + '</td>' +
-      '<td><button type="button" class="iconbtn" data-brm="1" aria-label="Remove line" title="Remove line">' + I.x + '</button></td></tr>';
+      '<td class="bbtns"><button type="button" class="iconbtn" data-badj="1" aria-label="Add an adjustment for this person" title="Add an adjustment for this person (expense, missed pay…)">' + I.plus + '</button><button type="button" class="iconbtn" data-brm="1" aria-label="Remove line" title="Remove line">' + I.x + '</button></td></tr>';
   }
   function openBasket(kind) {
     const b = basketFor(kind); if (!b) return;
@@ -3088,7 +3095,7 @@
       const fields = { payee: r.payee, site: r.site, amount: r.amount, what: r.what || name, extra: !!r.what, run: name };
       const t = r.id && taskById(r.id), p = t && payOf(t);
       if (p) { Object.assign(p, fields); if (p.status !== 'paid') p.date = date; keep.add(t.id); }
-      else await addPayment(Object.assign({ date }, fields));
+      else keep.add((await addPayment(Object.assign({ date }, fields))).id); // new lines stay when an existing payroll is edited
       if (r.carry) { const ct = taskById(r.carry), cp = ct && payOf(ct); if (cp) cp.redone = true; }
     }
     if (edit) pays().filter(x => x.p.run === edit && !keep.has(x.t.id)).forEach(x => trashTask(x.t));
@@ -3277,7 +3284,7 @@
     return [xlDate(p.date), p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
   }
   function payCopy(xs) {
-    const rows = xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || (a.t.createdAt - b.t.createdAt)).map(x => payXlRow(x.p));
+    const rows = payOrder(xs).map(x => payXlRow(x.p));
     if (!rows.length) { toast('Nothing to copy'); return; }
     const done = () => toast(rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' copied. In Excel, click the Date cell of the first empty row and press Ctrl+V.');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(rows.join('\r\n')).then(done, () => toast('Couldn’t copy. Try again.')); else toast('Copying isn’t available here.');
@@ -3425,6 +3432,7 @@
       if (t.closest('[data-bsave]')) return basketSave();
       if (t.closest('[data-badd]')) { const tb = $('#bkRows'); tb.insertAdjacentHTML('beforeend', basketRowHtml({ on: true, payee: '', site: '', amount: '', what: '', info: '' }, tb.children.length)); $('.b-payee', tb.lastElementChild).focus(); basketSum(); return; }
       if (t.closest('[data-brm]')) { t.closest('tr').remove(); basketSum(); return; }
+      if (t.closest('[data-badj]')) { const tr = t.closest('tr'); tr.insertAdjacentHTML('afterend', basketRowHtml({ on: true, payee: $('.b-payee', tr).value, site: $('.b-site', tr).value, amount: '', what: '', info: 'Adjustment' }, 0)); const nr = tr.nextElementSibling; nr.classList.add('badj'); $('.b-what', nr).placeholder = 'what it’s for, e.g. expense report'; $('.b-amt', nr).focus(); basketSum(); return; }
       if (t.closest('[data-bpaste]')) { $('#bkPaste').hidden = !$('#bkPaste').hidden; if (!$('#bkPaste').hidden) $('#bk_paste').focus(); return; }
       if (t.closest('[data-bpasteadd]')) { const txt = $('#bk_paste').value, rs = parseRunLines(txt), tb = $('#bkRows'); rs.forEach(r => tb.insertAdjacentHTML('beforeend', basketRowHtml(Object.assign({ on: true, info: '' }, r), tb.children.length))); if (!$('#bk_name').value) { const first = (txt.split(/\r?\n/).find(l => l.split('\t').length >= 7) || '').split('\t'); const pt = periodText(first[4] || ''); if (pt) $('#bk_name').value = pt; const d = sheetDate(first[0] || ''); if (d) $('#bk_date').value = d; } $('#bk_paste').value = ''; $('#bkPaste').hidden = true; basketSum(); toast(rs.length + ' lines added'); return; }
       if (t.closest('[data-rosterimportgo]')) return rosterImportSave();
