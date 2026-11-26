@@ -1288,6 +1288,19 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .pdate.sched, .schedtxt { color: #6a3fb8; font-weight: 600; }
 .btable.sheet .s-date.sched { color: #6a3fb8; font-weight: 600; }
 
+.pstick { position: sticky; top: -6px; z-index: 6; margin: -6px -32px 6px; padding: 8px 32px 2px; background: var(--bg); }
+.pstick .ntabs { margin-bottom: 10px; }
+.pstick .paybar { margin-bottom: 8px; }
+.psel { font-size: 13px; font-variant-numeric: tabular-nums; padding: 4px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.prow.pdrag { grid-template-columns: 14px 22px 64px 1fr auto auto; }
+.pgrip { color: var(--muted); cursor: grab; font-size: 11px; letter-spacing: -2px; user-select: none; opacity: .5; }
+.prow.pdrag:hover .pgrip { opacity: 1; }
+.prow.dragging { opacity: .4; }
+.prow.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.prow.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+@media (max-width: 900px) { .pstick { margin: -6px -16px 6px; padding: 8px 16px 2px; } }
+@media (max-width: 600px) { .pstick { margin: -4px -12px 6px; padding: 6px 12px 2px; } .prow.pdrag { grid-template-columns: 12px 20px 1fr auto; } }
+
 </style>
 </head>
 <body>
@@ -4566,7 +4579,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
     const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
-    return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + '">' +
+    return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + (opts && opts.drag ? ' pdrag" draggable="true" data-pdrag="' + x.t.id + '" title="Drag to change the order' : '') + '">' + (opts && opts.drag ? '<span class="pgrip" aria-hidden="true">⋮⋮</span>' : '') +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
       '<span class="pdate' + (isPaid(p) ? '' : isSched(p) ? ' sched' : ' pend') + '">' + (isPaid(p) || isSched(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
       '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || (p.dir === 'in' ? 'Head office' : p.what) || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
@@ -4608,6 +4621,11 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   }
   const usdAed = (aed, rate, big) => '<b>AED ' + (big ? money0(aed) : money(aed)) + '</b><span>$' + (big ? money0(aed / rate) : money(aed / rate)) + '</span>';
 
+  // Ticked rows: how many and how much (money out, less any money in)
+  function selTotal() {
+    const xs = pays().filter(x => ui.paySel.has(x.t.id)), t = payTotal(xs);
+    return '<b>' + xs.length + ' selected</b> · ' + (t < 0 ? '+AED ' + money(-t) + ' in' : 'AED ' + money(t));
+  }
   function renderPayments() {
     const title = 'Payments';
     if (vault.key) payAutoPaid();
@@ -4617,23 +4635,24 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
     let html = '<div class="ntabs ptabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
     const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button>' + (extra || '') + '<span class="spacer"></span>' +
-      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="req">Mark pending</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
+      (ui.paySel.size ? '<span class="psel">' + selTotal() + '</span><button type="button" class="chipbtn" data-paystatus="req">Mark pending</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
       '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
+    const selOnly = ui.paySel.size ? '<div class="paybar"><span class="psel">' + selTotal() + '</span><span class="spacer"></span><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paycopy="sel">Copy for Excel</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button></div>' : '';
+    html = '<div class="pstick">' + html + (tab === 'runs' || tab === 'fc' ? selOnly : bar()) + '</div>'; // frozen on top while you scroll
     if (tab === 'runs') html += renderPayroll(all);
-    else if (tab === 'sheet') html += bar() + renderSheet(all);
+    else if (tab === 'sheet') html += renderSheet(all);
     else if (tab === 'fc') html += renderForecast(all);
     else {
-      html += bar();
       let xs = payFilter(tab, all);
       if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount, or a date like 2026-11" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; xs = payFind(xs); }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
         runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
-        xs = loose;
+        xs = loose.slice().sort((a, b) => (a.p.order ?? 1e9) - (b.p.order ?? 1e9) || (b.p.date || '').localeCompare(a.p.date || '')); // your dragged order; new ones after, newest first
       }
       ui.payShown = xs.map(x => x.t.id);
-      if (xs.length) html += '<div class="pselall"><label><input type="checkbox" data-payselall="1"' + (xs.every(x => ui.paySel.has(x.t.id)) ? ' checked' : '') + '> Select all ' + xs.length + '</label></div><div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
+      if (xs.length) html += '<div class="pselall"><label><input type="checkbox" data-payselall="1"' + (xs.every(x => ui.paySel.has(x.t.id)) ? ' checked' : '') + '> Select all ' + xs.length + '</label></div><div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true, drag: tab === 'topay' })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
       else if (!(tab === 'topay' && payFilter('topay', all).length)) html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, payrolls you set up, and Pending or Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
     }
     const toPay = payFilter('topay', all);
@@ -5131,6 +5150,17 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && !isPaid(x.p)), d.to); return; }
       if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
     });
+    // Pending: drag a row to change the order (saved with the payment)
+    const content = $('#content');
+    content.addEventListener('dragstart', e => { const r = ui.view === 'payments' && e.target.closest && e.target.closest('.prow[data-pdrag]'); if (!r) return; ui.payDrag = r.dataset.pdrag; r.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', ui.payDrag); e.dataTransfer.effectAllowed = 'move'; } catch (err) { } });
+    content.addEventListener('dragover', e => { if (!ui.payDrag) return; const r = e.target.closest('.prow[data-pdrag]'); if (!r) return; e.preventDefault(); const after = e.clientY > r.getBoundingClientRect().top + r.offsetHeight / 2; document.querySelectorAll('.prow.drop-before,.prow.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); if (r.dataset.pdrag !== ui.payDrag) r.classList.add(after ? 'drop-after' : 'drop-before'); });
+    content.addEventListener('drop', e => {
+      if (!ui.payDrag) return; const r = e.target.closest('.prow[data-pdrag]'); if (!r) return; e.preventDefault();
+      const after = r.classList.contains('drop-after'), ids = [...document.querySelectorAll('.prow[data-pdrag]')].map(x => x.dataset.pdrag).filter(id => id !== ui.payDrag);
+      if (r.dataset.pdrag !== ui.payDrag) ids.splice(ids.indexOf(r.dataset.pdrag) + (after ? 1 : 0), 0, ui.payDrag); else ids.splice(ids.length, 0);
+      snapshot(); ids.forEach((id, i) => { const t = taskById(id), p = t && payOf(t); if (p) p.order = i; }); ui.payDrag = null; save(); renderMain();
+    });
+    content.addEventListener('dragend', () => { if (!ui.payDrag) return; ui.payDrag = null; document.querySelectorAll('.prow.dragging,.prow.drop-before,.prow.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
     $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; ui.paySel = new Set(); const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
     $('#content').addEventListener('change', e => {
       if (!e.target.closest || !e.target.closest('table.sheet')) return;
