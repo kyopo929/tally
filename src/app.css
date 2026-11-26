@@ -1287,3 +1287,10 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .prow.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 @media (max-width: 900px) { .pstick { margin: -6px -16px 6px; padding: 8px 16px 2px; } }
 @media (max-width: 600px) { .pstick { margin: -4px -12px 6px; padding: 6px 12px 2px; } .prow.pdrag { grid-template-columns: 12px 20px 1fr auto; } }
+
+.prunlines { margin: -6px auto 14px; border-top-left-radius: 0; border-top-right-radius: 0; }
+.ptable tr[data-rdrag] { cursor: grab; }
+.ptable tr.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+.ptable tr.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
+.ptable tr.dragging { opacity: .4; }
+.psec .hint { margin-left: 4px; }
