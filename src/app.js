@@ -562,6 +562,7 @@
   /* ---------- toast ---------- */
   let toastTimer;
   function toast(msg, undoable) {
+    msg = unbr(String(msg));
     const el = $('#toast');
     el.innerHTML = '<span>' + esc(msg) + '</span>' + (undoable && ui.undo ? '<button type="button" id="undoBtn">Undo</button>' : '');
     el.hidden = false;
@@ -921,7 +922,7 @@
   }
   function spanPills(spans) {
     if (!spans || !spans.length) return '';
-    return '<div class="spanline">' + spans.map(sp => '<button type="button" class="spanpill" ' + (sp.t.holiday ? 'data-dayopen="' + sp.s + '"' : 'data-open="' + sp.t.id + '"') + ' style="--c:' + eventColor(sp.t) + '" title="' + esc(sp.t.title) + ', ' + esc(D.dueLabel(sp.s)) + ' to ' + esc(D.dueLabel(sp.e)) + '">' + esc(sp.t.title) + '<span>until ' + esc(D.dueLabel(sp.e)) + '</span></button>').join('') + '</div>';
+    return '<div class="spanline">' + spans.map(sp => '<button type="button" class="spanpill" ' + (sp.t.holiday ? 'data-dayopen="' + sp.s + '"' : 'data-open="' + sp.t.id + '"') + ' style="--c:' + eventColor(sp.t) + '" title="' + esc(unbr(sp.t.title)) + ', ' + esc(D.dueLabel(sp.s)) + ' to ' + esc(D.dueLabel(sp.e)) + '">' + esc(unbr(sp.t.title)) + '<span>until ' + esc(D.dueLabel(sp.e)) + '</span></button>').join('') + '</div>';
   }
   function taskRow(t, opts = {}) {
     if (isNote(t)) return noteRow(t);
@@ -944,8 +945,8 @@
     if (t.notes) meta.push('<span>' + I.note + 'Note</span>');
     if (opts.showList && l && S.lists.length > 1) meta.push('<span><span class="dot" style="background:' + l.color + ';margin:0;width:8px;height:8px"></span>' + esc(l.name) + '</span>');
     return '<div class="task' + (t.done ? ' done' : '') + (ui.selected === t.id ? ' sel' : '') + (ui.multi.has(t.id) ? ' msel' : '') + (notStarted(t) && !t.done ? ' later' : '') + '" data-id="' + t.id + '" draggable="' + !t.done + '">' +
-      '<button type="button" class="check" data-act="toggle" aria-label="' + (t.done ? 'Mark not done' : 'Complete') + ': ' + esc(t.title) + '">' + I.check + '</button>' +
-      '<div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + linkify(t.title) + '</div>' + (meta.length ? '<div class="tmeta">' + meta.join('') + '</div>' : '') + (!t.done && t.steps.length && !t.fold ? '<div class="isteps">' + t.steps.map(st => '<div class="istep' + (st.done ? ' done' : '') + '"><button type="button" class="check small" data-stepdone="' + t.id + ':' + st.id + '" aria-label="' + (st.done ? 'Mark not done' : 'Complete') + ': ' + esc(st.title) + '">' + I.check + '</button><span>' + esc(st.title) + '</span></div>').join('') + '</div>' : '') + '</div>' +
+      '<button type="button" class="check" data-act="toggle" aria-label="' + (t.done ? 'Mark not done' : 'Complete') + ': ' + esc(unbr(t.title)) + '">' + I.check + '</button>' +
+      '<div class="tbody" data-act="open" role="button" tabindex="0"><div class="ttitle">' + linkify(t.title) + '</div>' + (meta.length ? '<div class="tmeta">' + meta.join('') + '</div>' : '') + (!t.done && t.steps.length && !t.fold ? '<div class="isteps">' + t.steps.map(st => '<div class="istep' + (st.done ? ' done' : '') + '"><button type="button" class="check small" data-stepdone="' + t.id + ':' + st.id + '" aria-label="' + (st.done ? 'Mark not done' : 'Complete') + ': ' + esc(unbr(st.title)) + '">' + I.check + '</button><span>' + esc(unbr(st.title)) + '</span></div>').join('') + '</div>' : '') + '</div>' +
       (nudgeDue(t) ? '<button type="button" class="skipbtn" data-act="followed" title="You chased them: Tally nudges you again in ' + (t.waiting.every || 3) + ' days">Followed up</button>' : '') +
       (!t.done && t.recur && t.due && t.due < todayISO() ? '<button type="button" class="skipbtn" data-act="skip" title="Didn\u2019t do it? Skip to the next one (' + esc(D.dueLabel(D.nextOccurrence(t.due, t.recur))) + ')">Skip</button>' : '') +
       (t.done ? '' : '<button type="button" class="iconbtn sunbtn' + (t.myDay === todayISO() ? ' on' : '') + '" data-act="myday" aria-label="' + (t.myDay === todayISO() ? 'Remove from My Day' : 'Add to My Day') + '" title="' + (t.myDay === todayISO() ? 'Remove from My Day' : 'Add to My Day') + '">' + I.sun + '</button>') +
@@ -1225,7 +1226,7 @@
         const d = D.addDays(ws, c), iso = D.toISO(d);
         const items = [].concat(...(byDay[iso] || []).filter(x => x.kind !== 'skip').map((x, k, all) => x.kind === 'note' ? (isMeet(x.t) ? (x.t.evId && all.some(z => z.kind === 'event' && z.t.id === x.t.evId) ? [] : [{ t: x.t, kind: 'note', line: (x.t.time ? D.fmtTime(x.t.time) + ' ' : '') + (mName(x.t) || 'Meeting'), meet: true }]) : noteLines(x.t).map(l => ({ t: x.t, kind: 'note', line: l }))) : [x])).sort(calOrder);
         const chip = ({ t, kind, ghost, line, meet }) => kind === 'note' ? '<span class="pch pnotec' + (meet ? ' pmeet' : '') + '">' + esc(line || 'Note') + '</span>'
-          : kind === 'event' || kind === 'expiry' ? '<span class="pch pev" style="--c:' + (kind === 'expiry' ? '#b3261e' : eventColor(t)) + '">' + esc(kind === 'expiry' ? noteTitle(t) : t.title) + '</span>'
+          : kind === 'event' || kind === 'expiry' ? '<span class="pch pev" style="--c:' + (kind === 'expiry' ? '#b3261e' : eventColor(t)) + '">' + esc(kind === 'expiry' ? noteTitle(t) : plainLinks(t.title)) + '</span>'
           : '<span class="pch ptask' + (t.done ? ' done' : '') + (ghost ? ' ghost' : '') + (!ghost && !t.done && iso < T ? ' over' : '') + '">' + esc(plainLinks(t.title)) + '</span>';
         const extra = (items.length > MAXCH ? items.length - (MAXCH - 1) : 0) + hidden[c];
         const shown = items.slice(0, items.length > MAXCH ? MAXCH - 1 : MAXCH);
@@ -1309,7 +1310,7 @@
     el.innerHTML = '<div class="d-scroll">' +
       '<div class="d-title"><button type="button" class="check" data-dact="toggle" aria-label="Complete">' + I.check + '</button><textarea id="dTitle" rows="1" aria-label="Task title">' + esc(t.title) + '</textarea><button type="button" class="iconbtn" data-dact="close" aria-label="Close details">' + I.x + '</button></div>' +
       (t.expFor && taskById(t.expFor) && isPaper(taskById(t.expFor)) ? '<button type="button" class="toggle-row" data-expdoc="' + t.expFor + '">' + I.idcard + 'Open ' + (isDoc(taskById(t.expFor)) ? 'document' : 'note') + ': ' + esc(trunc(noteTitle(taskById(t.expFor)), 40)) + '</button>' : '') +
-      '<div class="card steps">' + t.steps.map(s => '<div class="step' + (s.done ? ' done' : '') + '" data-step="' + s.id + '"><button type="button" class="check" data-sact="toggle" aria-label="Complete step">' + I.check + '</button><span>' + esc(s.title) + '</span><button type="button" class="iconbtn" data-sact="del" aria-label="Delete step">' + I.x + '</button></div>').join('') +
+      '<div class="card steps">' + t.steps.map(s => '<div class="step' + (s.done ? ' done' : '') + '" data-step="' + s.id + '"><button type="button" class="check" data-sact="toggle" aria-label="Complete step">' + I.check + '</button><span>' + esc(unbr(s.title)) + '</span><button type="button" class="iconbtn" data-sact="del" aria-label="Delete step">' + I.x + '</button></div>').join('') +
       '<input id="dStep" placeholder="+ Add step" aria-label="Add step"></div>' +
       '<button type="button" class="toggle-row' + (t.myDay === T ? ' on' : '') + '" data-dact="myday">' + I.sun + (t.myDay === T ? 'Added to My Day' : 'Add to My Day') + '</button>' +
       '<div class="field"><span class="field-label">Due</span><div class="row2"><input type="date" class="ctl" id="dDue" value="' + (t.due || '') + '" aria-label="Due date"><input type="time" class="ctl" id="dTime" value="' + (t.time || '') + '" aria-label="Time"' + (t.due ? '' : ' disabled') + '></div>' +
@@ -1337,7 +1338,7 @@
       Object.entries(EVCOLORS).map(([k, c]) => '<button type="button" class="swatch-btn' + (t.color === k ? ' on' : '') + '" data-evcolor="' + k + '" style="background:' + c + '" aria-label="' + k + '" title="' + k[0].toUpperCase() + k.slice(1) + '"></button>').join('') + '</div><span class="hint">Auto uses your colors from Settings (yearly, multi-day, events).</span></div>' +
       repeatField(t) +
       (isYearly(t) ? '<div class="field"><label for="dSince">' + (BDAY_WORDS.test(t.title) ? 'Year born' : 'Since (year)') + ' <span class="hint">(optional)</span></label><input type="number" class="ctl" id="dSince" min="1900" max="' + new Date().getFullYear() + '" placeholder="e.g. 1985" value="' + (t.since || '') + '"><span class="hint">' + (ageLabel(t, t.due) ? 'Shows \u201c' + esc(ageLabel(t, t.due)) + '\u201d on ' + esc(D.dueLabel(t.due)) + '.' : 'Add it to see the age or number of years.') + '</span></div>' : '') +
-      (spanLen(t) && overlapsWith(t).length ? '<div class="evnote">Also away during this time: ' + overlapsWith(t).map(o => esc(o.title) + ' (' + esc(D.dueLabel(o.due)) + ' \u2013 ' + esc(D.dueLabel(o.end)) + ')').join(', ') + '</div>' : '') +
+      (spanLen(t) && overlapsWith(t).length ? '<div class="evnote">Also away during this time: ' + overlapsWith(t).map(o => esc(unbr(o.title)) + ' (' + esc(D.dueLabel(o.due)) + ' \u2013 ' + esc(D.dueLabel(o.end)) + ')').join(', ') + '</div>' : '') +
       reminderField(t) + meetField(t) +
       '<div class="field"><label for="dNotes">Notes</label><textarea class="ctl" id="dNotes" placeholder="Add a note. Links you paste become clickable below.">' + esc(t.notes) + '</textarea><div class="links" id="dLinks">' + linksHtml(t) + '</div></div>' + attField(t) +
       '</div><div class="d-foot"><span>Event</span><span class="spacer"></span><button type="button" class="danger-btn" data-dact="del">Delete</button></div>';
@@ -1571,7 +1572,7 @@
     const t = alarmQueue.length && taskById(alarmQueue[0]);
     if (!t) { el.hidden = true; return; }
     el.hidden = false;
-    el.innerHTML = '<div class="when">' + I.bell + 'Reminder' + (alarmQueue.length > 1 ? ' · ' + alarmQueue.length + ' waiting' : '') + '</div><div class="t">' + esc(t.title) + '</div>' +
+    el.innerHTML = '<div class="when">' + I.bell + 'Reminder' + (alarmQueue.length > 1 ? ' · ' + alarmQueue.length + ' waiting' : '') + '</div><div class="t">' + esc(unbr(t.title)) + '</div>' +
       (t.due ? '<div class="when">' + I.cal + 'Due ' + esc(D.dueLabel(t.due)) + (t.time ? ' ' + D.fmtTime(t.time) : '') + '</div>' : '') +
       '<div class="row">' + (isEvent(t) ? '' : '<button type="button" class="chipbtn" data-al="done">Complete</button>') + '<button type="button" class="chipbtn" data-al="10">Snooze 10 min</button><button type="button" class="chipbtn" data-al="60">1 hour</button><button type="button" class="chipbtn" data-al="open">Open</button><button type="button" class="chipbtn" data-al="dismiss">Dismiss</button></div>';
   }
@@ -1615,9 +1616,9 @@
       const t = taskById(id); if (!t) { ui.menu = null; el.hidden = true; return; }
       const md = t.myDay === todayISO();
       if (isEvent(t)) {
-        h += '<div class="mlabel">' + esc(trunc(t.title, 34)) + '</div><button type="button" data-tact="totask">' + I.check + 'Make it a task</button><button type="button" data-tact="dup">' + I.steps + 'Duplicate</button><button type="button" class="danger" data-tact="del">' + I.trash + 'Delete event</button>';
+        h += '<div class="mlabel">' + esc(trunc(unbr(t.title), 34)) + '</div><button type="button" data-tact="totask">' + I.check + 'Make it a task</button><button type="button" data-tact="dup">' + I.steps + 'Duplicate</button><button type="button" class="danger" data-tact="del">' + I.trash + 'Delete event</button>';
       } else
-      h += '<div class="mlabel">' + esc(trunc(t.title, 34)) + '</div>' +
+      h += '<div class="mlabel">' + esc(trunc(unbr(t.title), 34)) + '</div>' +
         '<button type="button" data-tact="today">' + I.sun + 'Due today</button><button type="button" data-tact="tomorrow">' + I.cal + 'Due tomorrow</button>' +
         '<button type="button" data-tact="nextweek">' + I.cal + 'Due next week</button><button type="button" data-tact="weekend">' + I.cal + 'Due this weekend</button>' +
         (t.due ? '<button type="button" data-tact="nodate">' + I.x + 'Remove due date</button>' : '') +
@@ -3928,7 +3929,7 @@
     return '<div class="ncard' + (n.pinned ? ' pinned' : '') + (ui.selected === n.id ? ' sel' : '') + '" data-note="' + n.id + '" tabindex="0" role="button" aria-label="' + esc(noteTitle(raw)) + '">' +
       collage(raw) +
       ((n.title || n.body || items.length || s) ? '<div class="nbody">' +
-        (n.title ? '<div class="ntitle">' + esc(n.title) + '</div>' : '') +
+        (n.title ? '<div class="ntitle">' + esc(unbr(n.title)) + '</div>' : '') +
         (s ? '<div class="nlockline">' + I.lock + 'Locked</div>'
           : n.kind === 'list' ? '<ul class="nlist">' + items.filter(i => !i.done).slice(0, 6).map(i => '<li><span class="box"></span>' + esc(i.text) + '</li>').join('') + (items.filter(i => i.done).length ? '<li class="donecount">+ ' + items.filter(i => i.done).length + ' checked</li>' : '') + '</ul>'
             : (n.body ? (hasRich(n.body) ? richBody(n.body.split('\n').slice(0, 14).join('\n'), n.id) : '<div class="ntext">' + linkify(n.body.slice(0, 400)) + '</div>') : '')) +
@@ -4083,7 +4084,7 @@
   }
   function openShareReady() {
     const el = $('#sheet'), r = ui.shareReady;
-    el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true"><div class="sheet-head"><h2>Ready to send</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body"><p>' + r.files.length + ' file' + (r.files.length === 1 ? '' : 's') + ': ' + esc(r.title) + '</p><button type="button" class="chipbtn solid" id="shareNow">' + I.share + 'Share</button></div></div>';
+    el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true"><div class="sheet-head"><h2>Ready to send</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body"><p>' + r.files.length + ' file' + (r.files.length === 1 ? '' : 's') + ': ' + esc(unbr(r.title)) + '</p><button type="button" class="chipbtn solid" id="shareNow">' + I.share + 'Share</button></div></div>';
     el.hidden = false;
   }
   async function copyPicture(raw) {
