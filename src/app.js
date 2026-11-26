@@ -3474,6 +3474,7 @@
   function bindPay() {
     if (!PAY_ON) return;
     const go = () => needVault().then(ok => { if (ok) render(); });
+    $('#content').addEventListener('mousedown', e => { if (e.shiftKey && e.target.matches && e.target.matches('[data-paysel]')) e.preventDefault(); }); // no text highlighting on Shift-click
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
       const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
@@ -3490,7 +3491,12 @@
       if (d.recfind) return openRecFind();
       if (d.rosteropen) { ui.rosterOpen = ui.rosterOpen === d.rosteropen ? null : d.rosteropen; renderMain(); return; }
       if (d.payedit) return openPayForm(d.payedit);
-      if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
+      if (d.paysel) { // Shift-click ticks (or unticks) everything between the last box you clicked and this one
+        const boxes = [...document.querySelectorAll('#content [data-paysel]')].map(x => x.dataset.paysel), i = boxes.indexOf(d.paysel), j = boxes.indexOf(ui.payLast);
+        const ids = e.shiftKey && j >= 0 && i >= 0 ? boxes.slice(Math.min(i, j), Math.max(i, j) + 1) : [d.paysel];
+        ids.forEach(id => b.checked ? ui.paySel.add(id) : ui.paySel.delete(id)); ui.payLast = d.paysel;
+        const y = $('#content').scrollTop; renderMain(); $('#content').scrollTop = y; return;
+      }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
       if (d.rosteraz) { (async () => { snapshot(); await setPayCfg({ rosterSort: 'alpha' }); renderMain(); toast('Payroll order: A–Z', true); })(); return; }
       if (d.sheetmore) { ui.sheetLimit = (ui.sheetLimit || 150) + 300; renderMain(); return; }
