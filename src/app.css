@@ -1271,3 +1271,6 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .btable.sheet th:first-child, .btable.sheet td:first-child { width: 136px; }
 .pdate.pend, .btable.sheet .spend { color: #8a5a00; font-weight: 600; font-size: 12px; }
 .btable.sheet .spend { padding: 0 8px; }
+.pst.st-sched { background: color-mix(in srgb, #7b4fc9 16%, transparent); color: #6a3fb8; }
+.pdate.sched, .schedtxt { color: #6a3fb8; font-weight: 600; }
+.btable.sheet .s-date.sched { color: #6a3fb8; font-weight: 600; }

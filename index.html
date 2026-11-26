@@ -1284,6 +1284,9 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .btable.sheet th:first-child, .btable.sheet td:first-child { width: 136px; }
 .pdate.pend, .btable.sheet .spend { color: #8a5a00; font-weight: 600; font-size: 12px; }
 .btable.sheet .spend { padding: 0 8px; }
+.pst.st-sched { background: color-mix(in srgb, #7b4fc9 16%, transparent); color: #6a3fb8; }
+.pdate.sched, .schedtxt { color: #6a3fb8; font-weight: 600; }
+.btable.sheet .s-date.sched { color: #6a3fb8; font-weight: 600; }
 
 </style>
 </head>
@@ -4476,8 +4479,16 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
      Both are always locked: everything about them sits in `body`, scrambled with the passphrase before it's saved or synced.
      Nothing about payments is in the code. Columns follow the cash-flow sheet:
      Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes. */
-  const PAY_ST = [['req', 'Pending'], ['paid', 'Paid']]; // you request, approve and pay yourself: just Pending or Paid ('ok' from before counts as Pending)
+  const PAY_ST = [['req', 'Pending'], ['sched', 'Scheduled'], ['paid', 'Paid']]; // you request, approve and pay yourself: just Pending or Paid ('ok' from before counts as Pending)
   const isPaid = p => p.status === 'paid';
+  const isSched = p => p.status === 'sched';
+  // Scheduled payments go out by themselves: on their date they become Paid
+  function payAutoPaid() {
+    const T = todayISO(), due = pays().filter(x => isSched(x.p) && x.p.date && x.p.date <= T); if (!due.length) return;
+    due.forEach(x => { x.p.status = 'paid'; }); save();
+    const runs = [...new Set(due.map(x => x.p.run).filter(Boolean))];
+    setTimeout(() => toast((runs.length ? 'Payroll ' + runs.join(', ') + ' went out' : due.length + ' scheduled payment' + (due.length === 1 ? '' : 's') + ' went out') + ': marked Paid'), 300);
+  }
   const PAY_NAME = Object.assign(Object.fromEntries(PAY_ST), { ok: 'Pending' });
   const payOf = t => ((vault.plain[t.id] || {}).body) || null;
   const pays = () => vault.key ? S.tasks.filter(isPay).map(t => ({ t, p: payOf(t) })).filter(x => x.p) : [];
@@ -4557,11 +4568,11 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
     return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + '">' +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
-      '<span class="pdate' + (isPaid(p) ? '' : ' pend') + '">' + (isPaid(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
+      '<span class="pdate' + (isPaid(p) ? '' : isSched(p) ? ' sched' : ' pend') + '">' + (isPaid(p) || isSched(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
       '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || (p.dir === 'in' ? 'Head office' : p.what) || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
       (opts && opts.why && why.length ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
       '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
-      '<button type="button" class="pst st-' + (isPaid(p) ? 'paid' : 'req') + '" data-paynext="' + x.t.id + '" title="Click to mark ' + (isPaid(p) ? 'Pending' : 'Paid') + '">' + (isPaid(p) ? 'Paid' : 'Pending') + '</button></div>';
+      '<button type="button" class="pst st-' + (isPaid(p) ? 'paid' : isSched(p) ? 'sched' : 'req') + '" data-paynext="' + x.t.id + '" title="Click to mark ' + (isPaid(p) ? 'Pending' : 'Paid now') + '">' + (isPaid(p) ? 'Paid' : isSched(p) ? 'Scheduled' : 'Pending') + '</button></div>';
   }
   // Order for lists and Excel: by date; on each date a person's lines stay together, regular pay first, then adjustments
   function payOrder(xs) {
@@ -4599,6 +4610,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 
   function renderPayments() {
     const title = 'Payments';
+    if (vault.key) payAutoPaid();
     if (!vault.key) return { title, sub: 'Locked', actions: '', html: '<div class="empty"><strong>Payments are locked</strong>They’re scrambled with your passphrase, so only you can read them.<div style="margin-top:14px"><button type="button" class="chipbtn solid" data-payunlock="1">' + I.lock + (vaultItem() ? 'Unlock' : 'Choose a passphrase') + '</button></div></div>' };
     const all = pays().sort((a, b) => (b.p.date || '').localeCompare(a.p.date || '') || (b.t.createdAt - a.t.createdAt));
     const tab = ui.payTab || 'all'; if (!ui.paySel) ui.paySel = new Set();
@@ -4617,7 +4629,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
-        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · pay date ' + esc(payDate(rs[0].p.date)) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button><button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
+        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
         xs = loose;
       }
       ui.payShown = xs.map(x => x.t.id);
@@ -4633,22 +4645,25 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function sheetRowHtml(x, bal) {
     const p = x.p, dep = p.dir === 'in' || p.failed || p.twice ? money(p.amount) : '', chk = p.dir === 'in' ? '' : money(p.amount);
     const cell = (k, v, cls, attrs) => '<td><input class="ctl s-' + k + (cls ? ' ' + cls : '') + '" value="' + esc(v == null ? '' : v) + '"' + (attrs || '') + '></td>';
-    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + '">' + (isPaid(p) ? cell('date', p.date || '', '', ' type="date"') : '<td class="spend">Pending</td>') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
+    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + '">' + (isPaid(p) || isSched(p) ? cell('date', p.date || '', isSched(p) ? 'sched' : '', ' type="date"') : '<td class="spend">Pending</td>') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
       cell('dep', dep, 'r', ' inputmode="decimal"') + cell('chk', chk, 'r', ' inputmode="decimal"') + '<td class="r sbal' + (bal < 0 ? ' neg' : '') + '">' + (bal == null ? '' : money(bal)) + '</td>' + cell('note', p.note) +
-      '<td><select class="ctl s-status sm">' + PAY_ST.map(([k, l]) => '<option value="' + k + '"' + ((isPaid(p) ? 'paid' : 'req') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
+      '<td><select class="ctl s-status sm">' + PAY_ST.map(([k, l]) => '<option value="' + k + '"' + ((isPaid(p) ? 'paid' : isSched(p) ? 'sched' : 'req') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
       '<td><button type="button" class="iconbtn" data-sdel="' + x.t.id + '" aria-label="Delete row" title="Delete row">' + I.x + '</button></td></tr>';
   }
   function renderSheet(all) {
     const cfg = payCfg(), paid = payOrder(all.filter(x => x.p.status === 'paid')), open = payOrder(all.filter(x => x.p.status !== 'paid'));
     // Balance works back from the bank balance you entered (Forecast tab): the last paid row shows that balance
-    const bal = new Map(); if (cfg.balance != null) { let b = Number(cfg.balance); for (let i = paid.length - 1; i >= 0; i--) { bal.set(paid[i].t.id, b); b -= netOf(paid[i].p); } }
+    const bal = new Map(); if (cfg.balance != null) {
+      const asOf = cfg.balanceDate || todayISO(); let k = paid.length - 1; while (k >= 0 && (paid[k].p.date || '') > asOf) k--; // the last payment the entered balance includes
+      let b = Number(cfg.balance); for (let i = k; i >= 0; i--) { bal.set(paid[i].t.id, b); b -= netOf(paid[i].p); }
+      b = Number(cfg.balance); for (let i = k + 1; i < paid.length; i++) { b += netOf(paid[i].p); bal.set(paid[i].t.id, b); } }
     const fp = payFind(paid), fo = payFind(open), lim = ui.sheetLimit || 150, shown = fp.slice(-lim);
     const head = '<thead><tr><th>Date</th><th>Vendor/Customer</th><th>Check #</th><th>Project</th><th>Description/Invoice #</th><th class="r">Deposit</th><th class="r">Check</th><th class="r">Balance</th><th>Notes</th><th>Status</th><th></th></tr></thead>';
     let h = '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount, or a date like 2026-11" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">' +
       '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
       (fp.length > shown.length ? '<div class="more-wrap"><button type="button" class="chipbtn" data-sheetmore="1">Show ' + Math.min(300, fp.length - shown.length) + ' older rows</button></div>' : '') +
       '<div class="pscroll sheetwrap"><table class="btable sheet">' + head + '<tbody>' + shown.map(x => sheetRowHtml(x, bal.get(x.t.id))).join('') + '</tbody>' +
-      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Pending (' + fo.length + ') · not in the balance yet</td></tr>' + fo.map(x => sheetRowHtml(x, null)).join('') + '</tbody>' : '') + '</table></div>' +
+      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Pending and scheduled (' + fo.length + ') · not in the balance yet</td></tr>' + fo.map(x => sheetRowHtml(x, null)).join('') + '</tbody>' : '') + '</table></div>' +
       '<div class="paybar"><button type="button" class="chipbtn" data-sadd="paid">' + I.plus + 'Row (paid)</button><button type="button" class="chipbtn" data-sadd="req">' + I.plus + 'Row (pending)</button><span class="spacer"></span><span class="hint">' + (cfg.balance == null ? 'Enter your bank balance in the Forecast tab to fill the Balance column.' : 'Balance ends at your bank balance of ' + money(cfg.balance) + ' (entered ' + esc(payDate(cfg.balanceDate)) + '). Enter moves down, like Excel.') + '</span></div>';
     return h;
   }
@@ -4663,7 +4678,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d && c && Math.abs(d - c) < 0.01) { p.amount = c; p.dir = 'out'; if (!p.failed) p.twice = true; }
       else if (d && c) { p.amount = r2(Math.abs(c - d)); p.dir = c > d ? 'out' : 'in'; p.twice = false; p.failed = false; }
       else { p.amount = d || c; p.dir = d ? 'in' : 'out'; p.twice = false; p.failed = false; }
-    } else if (k === 'status') { if (v === 'paid' && !isPaid(p)) p.date = todayISO(); p.status = v; } // paid today
+    } else if (k === 'status') { if (v === 'paid' && !isPaid(p)) p.date = todayISO(); if (v === 'sched' && !p.date) p.date = D.toISO(D.addDays(new Date(), 1)); p.status = v; } // paid today
     else p[{ date: 'date', payee: 'payee', check: 'check', site: 'site', what: 'what', note: 'note' }[k]] = v;
     save();
   }
@@ -4762,7 +4777,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       '<div class="pscroll"><table class="btable"><thead><tr><th></th><th>Name</th><th>Project</th><th class="r">Amount AED</th><th>Note (leave empty for regular pay)</th><th></th><th></th></tr></thead><tbody id="bkRows">' + b.rows.map(basketRowHtml).join('') + '</tbody></table></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn" data-badd="1">' + I.plus + 'Add line</button><button type="button" class="chipbtn" data-bpaste="1">Paste from Excel</button><span class="spacer"></span><b id="bkSum"></b></div>' +
       '<div id="bkPaste" hidden><textarea class="ctl" id="bk_paste" rows="5" placeholder="Copy rows from your sheet (Date to notes) or Name, Project, Amount lines, and paste here"></textarea><div class="pform-acts"><button type="button" class="chipbtn" data-bpasteadd="1">Add these lines</button></div></div>' +
-      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-bsave="1">' + (b.edit ? 'Save changes' : 'Add to Pending') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="bkMsg"></span></div></div></div>';
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-bsave="sched" title="Set up at the bank to go out on the pay date: marked Paid on that day">Schedule for pay date</button><button type="button" class="chipbtn" data-bsave="req">' + (b.edit ? 'Save as pending' : 'Add to Pending') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="bkMsg"></span></div></div></div>';
     $('#sheet').hidden = false; basketSum();
   }
   function basketRead() {
@@ -4773,7 +4788,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     el.textContent = rs.length + ' paid · AED ' + money(tot) + ' · $' + money(tot / rateOf());
     document.querySelectorAll('#bkRows tr').forEach(tr => tr.classList.toggle('off', !$('.b-on', tr).checked));
   }
-  async function basketSave() {
+  async function basketSave(mode) {
     const name = $('#bk_name').value.trim(), date = $('#bk_date').value || todayISO(), rows = basketRead(), edit = ui.basket && ui.basket.edit;
     if (!name) { $('#bkMsg').textContent = 'Type the pay period, like Nov 8 to Nov 21.'; return; }
     if (!edit && pays().some(x => x.p.run === name)) { $('#bkMsg').textContent = 'There’s already a payroll with that name. Open it from History to edit it.'; return; }
@@ -4786,12 +4801,12 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     for (const r of use) {
       const fields = { payee: r.payee, site: r.site, amount: r.amount, what: r.what || name, extra: !!r.what, run: name };
       const t = r.id && taskById(r.id), p = t && payOf(t);
-      if (p) { Object.assign(p, fields); if (p.status !== 'paid') p.date = date; keep.add(t.id); }
-      else keep.add((await addPayment(Object.assign({ date }, fields))).id); // new lines stay when an existing payroll is edited
+      if (p) { Object.assign(p, fields); if (!isPaid(p)) { p.date = date; p.status = mode === 'sched' ? 'sched' : 'req'; } keep.add(t.id); }
+      else keep.add((await addPayment(Object.assign({ date, status: mode === 'sched' ? 'sched' : 'req' }, fields))).id); // new lines stay when an existing payroll is edited
       if (r.carry) { const ct = taskById(r.carry), cp = ct && payOf(ct); if (cp) cp.redone = true; }
     }
     if (edit) pays().filter(x => x.p.run === edit && !keep.has(x.t.id)).forEach(x => trashTask(x.t));
-    save(); closeSheet(); ui.basket = null; ui.payTab = 'topay'; render(); toast(edit ? 'Payroll saved' : use.length + ' payments added to Pending', true);
+    save(); closeSheet(); ui.basket = null; ui.payTab = 'topay'; render(); toast(mode === 'sched' ? 'Payroll scheduled for ' + payDate(date) + ': it will be marked Paid that day' : edit ? 'Payroll saved' : use.length + ' payments added to Pending', true);
   }
   // Payroll lines from Excel: the sheet's rows (Date … notes), or Name, Project, Amount[, what it's for]
   function parseRunLines(text) {
@@ -4892,8 +4907,9 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   }
   function renderForecast(all) {
     const cfg = payCfg(), rate = cfg.rate || 3.67, months = ui.fcMonths || 12, ev = forecastEvents(all, months), today = D.startOfDay(new Date());
-    const bal = cfg.balance == null ? null : Number(cfg.balance);
-    let h = '<div class="pbal"><label for="fcBal">Bank balance today (AED)</label><input class="ctl r" id="fcBal" inputmode="decimal" value="' + (bal == null ? '' : money(bal)) + '" placeholder="e.g. 218,713.45"><span class="hint">' + (cfg.balanceDate ? 'Entered ' + esc(payDate(cfg.balanceDate)) : 'Type it from the bank or your sheet, then press Enter') + '</span><span class="spacer"></span><select class="ctl" id="fcMonths" aria-label="How far ahead">' + [3, 6, 12, 24].map(m => '<option value="' + m + '"' + (m === months ? ' selected' : '') + '>Next ' + m + ' months</option>').join('') + '</select></div>';
+    const after = cfg.balance == null ? [] : all.filter(x => isPaid(x.p) && x.p.date && x.p.date > (cfg.balanceDate || todayISO())); // paid since the balance was entered
+    const bal = cfg.balance == null ? null : Number(cfg.balance) + after.reduce((s, x) => s + netOf(x.p), 0);
+    let h = '<div class="pbal"><label for="fcBal">Bank balance today (AED)</label><input class="ctl r" id="fcBal" inputmode="decimal" value="' + (cfg.balance == null ? '' : money(cfg.balance)) + '" placeholder="e.g. 218,713.45"><span class="hint">' + (cfg.balanceDate ? 'Entered ' + esc(payDate(cfg.balanceDate)) + (after.length ? ' · now about AED ' + money(bal) + ' after ' + after.length + ' payment' + (after.length === 1 ? '' : 's') + ' since' : '') : 'Type it from the bank or your sheet, then press Enter') + '</span><span class="spacer"></span><select class="ctl" id="fcMonths" aria-label="How far ahead">' + [3, 6, 12, 24].map(m => '<option value="' + m + '"' + (m === months ? ' selected' : '') + '>Next ' + m + ' months</option>').join('') + '</select></div>';
     // month by month
     const rows = []; let run = bal || 0;
     for (let m = 0; m < months; m++) {
@@ -4973,7 +4989,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const notes = [], add = s => { if (s && !notes.some(n => n.toLowerCase().includes(s.toLowerCase()))) notes.push(s); };
     add(p.note); if (p.failed) add('payment did not go through'); if (p.receipt === 'no') add('Need receipt'); add(p.chase);
     const dep = p.dir === 'in' || p.failed || p.twice ? p.amount : '', chk = p.dir === 'in' ? '' : p.amount;
-    return [isPaid(p) ? xlDate(p.date) : 'Pending', p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
+    return [isPaid(p) || isSched(p) ? xlDate(p.date) : 'Pending', p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
   }
   function payCopy(xs) {
     const rows = payOrder(xs).map(x => payXlRow(x.p));
@@ -5011,6 +5027,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     if (!v('payee') && !v('what')) { $('#pfMsg').textContent = 'Add who it’s for or a description.'; return; }
     if (!isFinite(amt) || amt <= 0) { $('#pfMsg').textContent = 'Type the amount, like 1500.00'; return; }
     if (!(await needVault())) return;
+    if (v('status') === 'sched' && !v('date')) { $('#pfMsg').textContent = 'Pick the date it goes out.'; return; }
     const fields = { date: v('date') || (v('status') === 'paid' ? todayISO() : ''), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
     snapshot();
     const raw = form.dataset.payid && taskById(form.dataset.payid);
@@ -5108,8 +5125,8 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
       if (d.runmore) { ui.runLimit = (ui.runLimit || 12) + 24; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
-      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { if (st === 'paid' && !isPaid(x.p)) x.p.date = todayISO(); x.p.status = st; }); /* marked paid: paid today */ save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
-      if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], isPaid(p) ? 'req' : 'paid'); return; }
+      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { if (st === 'paid' && !isPaid(x.p)) x.p.date = todayISO(); if (st === 'sched' && !x.p.date) x.p.date = todayISO(); x.p.status = st; }); /* marked paid: paid today */ save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
+      if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], isPaid(p) ? 'req' : 'paid'); return; } // Scheduled or Pending → Paid now; Paid → Pending
       if (d.paystatus) { set(pays().filter(x => ui.paySel.has(x.t.id)), d.paystatus); ui.paySel = new Set(); renderMain(); return; }
       if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && !isPaid(x.p)), d.to); return; }
       if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
@@ -5131,7 +5148,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       const t = e.target;
       if (t.closest('[data-paysave]')) return savePayForm();
       if (t.closest('[data-payimportgo]')) return saveImport();
-      if (t.closest('[data-bsave]')) return basketSave();
+      if (t.closest('[data-bsave]')) return basketSave(t.closest('[data-bsave]').dataset.bsave);
       if (t.closest('[data-badd]')) { const tb = $('#bkRows'); tb.insertAdjacentHTML('beforeend', basketRowHtml({ on: true, payee: '', site: '', amount: '', what: '', info: '' }, tb.children.length)); $('.b-payee', tb.lastElementChild).focus(); basketSum(); return; }
       if (t.closest('[data-brm]')) { t.closest('tr').remove(); basketSum(); return; }
       if (t.closest('[data-badj]')) { const tr = t.closest('tr'); tr.insertAdjacentHTML('afterend', basketRowHtml({ on: true, payee: $('.b-payee', tr).value, site: $('.b-site', tr).value, amount: '', what: '', info: 'Adjustment' }, 0)); const nr = tr.nextElementSibling; nr.classList.add('badj'); $('.b-what', nr).placeholder = 'what it’s for, e.g. expense report'; $('.b-amt', nr).focus(); basketSum(); return; }
