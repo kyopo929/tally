@@ -2947,7 +2947,9 @@
     const pos = new Map(S.tasks.map((t, i) => [t.id, i])), at = x => pos.get(x.t.id) ?? 0, key = x => (x.p.date || '') + '|' + normName(x.p.payee); // the order they were added
     const first = {}; xs.forEach(x => { const k = key(x), c = at(x) + (x.p.extra ? 1e9 : 0); if (!(k in first) || c < first[k]) first[k] = c; });
     const rank = rosterRank(), R = x => x.p.run ? (rank.has(normName(x.p.payee)) ? rank.get(normName(x.p.payee)) : 1e5) : 2e5;
-    return xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || R(a) - R(b) || (R(a) === 1e5 ? (a.p.payee || '').localeCompare(b.p.payee || '') : 0) || (R(a) === 2e5 ? first[key(a)] - first[key(b)] : 0) || (a.p.extra ? 1 : 0) - (b.p.extra ? 1 : 0) || at(a) - at(b));
+    const runDay = {}; xs.forEach(x => { if (x.p.run && !x.p.extra) { const c = runDay[x.p.run] = runDay[x.p.run] || {}; c[x.p.date || ''] = (c[x.p.date || ''] || 0) + 1; } });
+    const D0 = x => { const c = x.p.run && runDay[x.p.run]; return c ? Object.entries(c).sort((a, b) => b[1] - a[1])[0][0] : (x.p.date || ''); }; // a payroll's main pay date
+    return xs.slice().sort((a, b) => D0(a).localeCompare(D0(b)) || R(a) - R(b) || (R(a) === 1e5 ? (a.p.payee || '').localeCompare(b.p.payee || '') : 0) || (R(a) === 2e5 ? first[key(a)] - first[key(b)] : 0) || (a.p.extra ? 1 : 0) - (b.p.extra ? 1 : 0) || at(a) - at(b));
   }
   // The filter box: a date (2026, 2026-11, 2026-11-01) filters by date; anything else searches the text
   function payFind(xs) {
@@ -3054,7 +3056,7 @@
       if (d && c && Math.abs(d - c) < 0.01) { p.amount = c; p.dir = 'out'; if (!p.failed) p.twice = true; }
       else if (d && c) { p.amount = r2(Math.abs(c - d)); p.dir = c > d ? 'out' : 'in'; p.twice = false; p.failed = false; }
       else { p.amount = d || c; p.dir = d ? 'in' : 'out'; p.twice = false; p.failed = false; }
-    } else if (k === 'status') { if (v === 'paid' && !isPaid(p)) p.date = todayISO(); if (v === 'sched' && !p.date) p.date = D.toISO(D.addDays(new Date(), 1)); p.status = v; } // paid today
+    } else if (k === 'status') { if (v === 'paid' && !isPaid(p)) { p.was = p.date || ''; p.date = todayISO(); } else if (v !== 'paid' && isPaid(p) && p.was !== undefined) { p.date = p.was; delete p.was; } if (v === 'sched' && !p.date) p.date = D.toISO(D.addDays(new Date(), 1)); p.status = v; } // paid today
     else p[{ date: 'date', payee: 'payee', check: 'check', site: 'site', what: 'what', note: 'note' }[k]] = v;
     save();
   }
@@ -3502,7 +3504,7 @@
       if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
       if (d.runmore) { ui.runLimit = (ui.runLimit || 12) + 24; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
-      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { if (st === 'paid' && !isPaid(x.p)) x.p.date = todayISO(); if (st === 'sched' && !x.p.date) x.p.date = todayISO(); x.p.status = st; }); /* marked paid: paid today */ save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
+      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { if (st === 'paid' && !isPaid(x.p)) { x.p.was = x.p.date || ''; x.p.date = todayISO(); } else if (st !== 'paid' && isPaid(x.p) && x.p.was !== undefined) { x.p.date = x.p.was; delete x.p.was; } if (st === 'sched' && !x.p.date) x.p.date = todayISO(); x.p.status = st; }); /* marked paid: paid today */ save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
       if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], isPaid(p) ? 'req' : 'paid'); return; } // Scheduled or Pending → Paid now; Paid → Pending
       if (d.paystatus) { set(pays().filter(x => ui.paySel.has(x.t.id)), d.paystatus); ui.paySel = new Set(); renderMain(); return; }
       if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && !isPaid(x.p)), d.to); return; }
