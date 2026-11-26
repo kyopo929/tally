@@ -50,9 +50,11 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 
 ## Payments (original site only)
 - Shown only where `/config.js` lists `features: ['payments']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=payments` in Vercel.
-- Each payment is an item with `type:'payment'`, always locked: everything about it lives in `body`, sealed with the locked-items passphrase before saving or syncing. No payment data is ever in this repo.
+- Always locked: payments are items with `type:'payment'`; the roster, repeating payments and bank balance are one item `paycfg`. Everything is in `body`, sealed with the locked-items passphrase before saving or syncing. No payment data is ever in this repo (not in tests or comments either).
 - Columns follow the cash-flow sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
-- Status: Requested → Approved → Paid. Tabs: To pay, Payroll, Chase (didn't go through, missing receipt, follow-up), All.
-- Import from sheet: paste rows A to I. Blank dates carry down; Pending/Due rows go to To pay; a month heading (a forecast) is skipped; rows already in Tally are skipped. A pay period in the Description ("Oct 25 to Nov 7") with a Project makes it payroll; one payroll per pay date.
-- Payroll is every two weeks: the Payroll tab offers the next period (+14 days) with the same people and amounts, plus anything that didn't go through. Extra lines (an expense, a missed payment) take a fourth column: what it's for.
-- Copy for Excel writes the sheet's columns; Balance is a formula that works on any row (row above + Deposit - Check); a transfer that didn't go through is written as the amount in both Deposit and Check with a note, as in the sheet.
+- Tabs: To pay (payrolls grouped), Payroll, Forecast, Chase, All.
+- Payroll: roster imported from the payroll list (Name … Housing Allowance), yearly USD; each pay = (salary + housing) × rate ÷ 26 (2-week) or ÷ 12 (month-end). Rate defaults to 3.67. Roster names are matched to how people appear in past payrolls ("Name in payroll"). Totals every 2 weeks / per month / per year in AED and USD; history with a chart; click a person for their payments.
+- Basket: a whole payroll as one table (tick, name, project, amount, note). The next 2-week payroll comes from the roster, flags anyone whose last pay differs, and adds transfers that didn't go through. Month-end staff get their own basket. Any payroll can be edited as a basket later.
+- Forecast: bank balance + 2-week payroll from the roster (new people at full pay) + month-end staff + repeating payments (suggested from history using the recent gap) + To pay items; month by month and the next 8 weeks.
+- Import from sheet: paste rows A to I. Blank dates carry down; Pending/Due rows go to To pay; month headings and rows dated more than a week ahead (the sheet's forecast) are skipped; rows already in Tally are skipped.
+- Copy for Excel writes the sheet's columns; Balance is a formula that works on any row (row above + Deposit - Check); a transfer that didn't go through is the amount in both Deposit and Check with a note.

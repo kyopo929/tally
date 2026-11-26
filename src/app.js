@@ -986,7 +986,7 @@
     if (ui.search) {
       const q = ui.search.toLowerCase();
       const tq = q.replace(/^@/, '');
-      const hit = t => !isPaper(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
+      const hit = t => !isPaper(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
       const found = sortTasks(S.tasks.filter(t => !t.done && hit(t)));
       const doneFound = S.tasks.filter(t => t.done && hit(t)).sort((a, b) => b.doneAt - a.doneAt);
       title = 'Search'; sub = '\u201c' + ui.search + '\u201d';
@@ -2826,21 +2826,26 @@
   }
 
 
-  /* ---------- Payments (original site only): a private log of payments to approve, pay and chase ----------
-     Each payment is an item with type:'payment'. Everything about it (payee, amount, project…) sits in `body`,
-     which is always locked: scrambled with the passphrase before it's saved or synced. Nothing about payments is in the code.
-     Columns follow the cash-flow sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes. */
+  /* ---------- Payments (original site only): a private log of payments, payroll and a cash forecast ----------
+     Each payment is an item with type:'payment'; the roster, repeating payments and bank balance are one item 'paycfg'.
+     Both are always locked: everything about them sits in `body`, scrambled with the passphrase before it's saved or synced.
+     Nothing about payments is in the code. Columns follow the cash-flow sheet:
+     Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes. */
   const PAY_ST = [['req', 'Requested'], ['ok', 'Approved'], ['paid', 'Paid']];
   const PAY_NAME = Object.fromEntries(PAY_ST);
   const payOf = t => ((vault.plain[t.id] || {}).body) || null;
   const pays = () => vault.key ? S.tasks.filter(isPay).map(t => ({ t, p: payOf(t) })).filter(x => x.p) : [];
+  const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
   const money = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const toNum = s => { const n = parseFloat(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : NaN; };
-  const isAmt = s => /^\(?-?(AED\s*)?[\d,]+(\.\d+)?\)?$/i.test(String(s || '').trim());
+  const money0 = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const toNum = s => { const n = parseFloat(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? r2(n) : NaN; };
+  const isAmt = s => /^\(?-?(AED\s*|\$\s*)?[\d,]+(\.\d+)?\)?$/i.test(String(s || '').trim());
   const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   const monIx = s => MON3.indexOf(String(s || '').slice(0, 3).toLowerCase());
   function payDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : ''); }
   function xlDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return String(d.getDate()).padStart(2, '0') + '-' + D.MON_SHORT[d.getMonth()] + '-' + String(d.getFullYear()).slice(2); } // like 13-Nov-26, as in the sheet
+  const monthName = d => D.MON_SHORT[d.getMonth()] + ' ' + d.getFullYear();
+  const lastOfMonth = d => new Date(d.getFullYear(), d.getMonth() + 1, 0);
   // A date as Excel copies it: 13-Nov-26, 11/13/2026 (month/day), 2026-11-13
   function sheetDate(s) {
     s = String(s || '').trim(); let m, y, mo, d;
@@ -2860,24 +2865,47 @@
     const sm = monIx(m[1]), em = m[3] ? monIx(m[3]) : sm; if (sm < 0 || em < 0) return null;
     const paid = paidISO ? D.fromISO(paidISO) : new Date();
     let ey = paid.getFullYear(); if (em > paid.getMonth() + 1) ey--; // a December period paid in January
-    const end = new Date(ey, em, +m[4]), start = new Date(sm > em ? ey - 1 : ey, sm, +m[2]);
-    return { start, end };
+    return { start: new Date(sm > em ? ey - 1 : ey, sm, +m[2]), end: new Date(ey, em, +m[4]) };
   }
   const periodLabel = (s, e) => D.MON_SHORT[s.getMonth()] + ' ' + s.getDate() + ' to ' + D.MON_SHORT[e.getMonth()] + ' ' + e.getDate();
   const chaseWhy = p => [p.failed && !p.redone ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
-  const payTabs = [['topay', 'To pay'], ['runs', 'Payroll'], ['chase', 'Chase'], ['all', 'All']];
+  const payTabs = [['topay', 'To pay'], ['runs', 'Payroll'], ['fc', 'Forecast'], ['chase', 'Chase'], ['all', 'All']];
   function payFilter(tab, all) {
     if (tab === 'topay') return all.filter(x => x.p.status === 'req' || x.p.status === 'ok');
     if (tab === 'chase') return all.filter(x => chaseWhy(x.p).length);
     return all;
   }
   const BLANK_PAY = () => ({ date: todayISO(), twice: false, payee: '', check: '', site: '', what: '', amount: 0, dir: 'out', status: 'req', receipt: 'yes', run: '', extra: false, failed: false, redone: false, chase: '', note: '' });
-  async function addPayment(fields) {
-    const t = newTask({ type: 'payment', locked: true });
-    const p = { body: Object.assign(BLANK_PAY(), fields) };
-    const j = JSON.stringify(p); t.sealed = await encStr(j); vault.plain[t.id] = p; vault.json[t.id] = j; vault.sealedAs[t.id] = t.sealed;
-    return t;
+  async function sealNew(t, body) { const p = { body }, j = JSON.stringify(p); t.sealed = await encStr(j); vault.plain[t.id] = p; vault.json[t.id] = j; vault.sealedAs[t.id] = t.sealed; return t; }
+  const addPayment = fields => sealNew(newTask({ type: 'payment', locked: true }), Object.assign(BLANK_PAY(), fields));
+
+  /* ---- settings: roster, repeating payments, bank balance (one locked item, the same on every device) ---- */
+  const CFG0 = () => ({ rate: 3.67, roster: [], recurring: [], balance: null, balanceDate: '' });
+  function payCfg() { const t = taskById('paycfg'), b = t && payOf(t); return b ? Object.assign(CFG0(), b) : CFG0(); }
+  async function setPayCfg(patch) {
+    const t = taskById('paycfg'), b = t && payOf(t);
+    if (b) Object.assign(b, patch); else if (t) return toast('Unlock first'); else await sealNew(newTask({ id: 'paycfg', type: 'paycfg', locked: true }), Object.assign(CFG0(), patch));
+    save();
   }
+  const rateOf = () => payCfg().rate || 3.67;
+  const annUSD = r => (Number(r.usd) || 0) + (Number(r.housing) || 0);
+  const perPay = (r, rate) => r2(annUSD(r) * (rate || rateOf()) / (r.freq === 'mo' ? 12 : 26)); // AED each payday
+  const payName = r => r.alias || r.name;
+  // "4000 AED/mo" or "$80,000": the roster keeps a yearly USD amount
+  function usdIn(s, rate) { const t = String(s || ''); let n = toNum(t); if (!isFinite(n)) return 0; if (/aed|dhs|dirham/i.test(t)) n = n / rate; if (/\/\s*m|month|monthly/i.test(t)) n = n * 12; return r2(n); }
+  // Match a roster name to how the person is written in the payroll ("Jane Doe" → "Jane", "Jon Smyth" → "John Smith")
+  const normName = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+  const toks = s => String(s || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  function lev(a, b) { const m = a.length, n = b.length, d = Array.from({ length: m + 1 }, (_, i) => [i]); for (let j = 1; j <= n; j++) d[0][j] = j; for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[m][n]; }
+  function matchName(name, cands) {
+    const n = normName(name); if (!n) return '';
+    const ex = cands.find(c => normName(c) === n); if (ex) return ex;
+    const ds = cands.map(c => [c, lev(n, normName(c))]).sort((a, b) => a[1] - b[1]);
+    if (ds.length && ds[0][1] <= Math.max(2, Math.floor(n.length * 0.22)) && !(ds[1] && ds[1][1] === ds[0][1])) return ds[0][0];
+    const a = toks(name), hit = cands.filter(c => { const b = toks(c); return b[0] && (b[0] === a[0] && (b.length === 1 || a.length === 1 || b[b.length - 1] === a[a.length - 1]) || (b[b.length - 1] === a[a.length - 1] && b[0][0] === a[0][0] && b.length > 1 && a.length > 1)); });
+    return hit.length === 1 ? hit[0] : '';
+  }
+
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
     const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
@@ -2891,49 +2919,353 @@
       '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
   }
   const payTotal = xs => xs.reduce((s, x) => s + (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0), 0);
-  // Pay runs, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date) }
+  // Payrolls, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date), two (a 2-week payroll) }
   function payRuns(all) {
     const m = new Map(); all.filter(x => x.p.run).forEach(x => { if (!m.has(x.p.run)) m.set(x.p.run, []); m.get(x.p.run).push(x); });
-    return [...m].map(([name, xs]) => { const reg = xs.filter(x => !x.p.extra); const ds = (reg.length ? reg : xs).map(x => x.p.date).filter(Boolean).sort(); return { name, all: xs, xs: reg, date: ds[Math.floor(ds.length / 2)] || '' }; })
+    return [...m].map(([name, xs]) => { const reg = xs.filter(x => !x.p.extra); const ds = (reg.length ? reg : xs).map(x => x.p.date).filter(Boolean).sort(); const date = ds[Math.floor(ds.length / 2)] || ''; return { name, all: xs, xs: reg, date, two: !!periodDates(name, date) }; })
       .sort((a, b) => b.date.localeCompare(a.date));
   }
-  // The next payroll: two weeks after the latest one
+  // The next 2-week payroll: the period after the latest one, paid two weeks after it
   function nextPayroll(all) {
-    const last = payRuns(all).find(r => periodDates(r.name, r.date)); if (!last) return null;
-    const pd = periodDates(last.name, last.date), s = D.addDays(pd.end, 1), e = D.addDays(pd.end, 14);
-    return { from: last.name, name: periodLabel(s, e), date: D.toISO(D.addDays(D.fromISO(last.date), 14)) };
+    const last = payRuns(all).find(r => r.two); if (!last) return null;
+    const pd = periodDates(last.name, last.date);
+    return { from: last.name, name: periodLabel(D.addDays(pd.end, 1), D.addDays(pd.end, 14)), start: D.addDays(pd.end, 1), end: D.addDays(pd.end, 14), date: D.toISO(D.addDays(D.fromISO(last.date), 14)) };
   }
+  const monthEndName = d => D.MON_SHORT[d.getMonth()] + ' ' + d.getFullYear() + ' month-end';
+  // Totals for the roster: every 2 weeks, per month, per year (AED and USD)
+  function payrollTotals(cfg) {
+    const rate = cfg.rate || 3.67, on = cfg.roster.filter(r => r.active !== false), two = on.filter(r => r.freq !== 'mo'), mo = on.filter(r => r.freq === 'mo');
+    const yr = xs => xs.reduce((s, r) => s + annUSD(r), 0);
+    return { rate, two, mo, twoPay: two.reduce((s, r) => s + perPay(r, rate), 0), moPay: mo.reduce((s, r) => s + perPay(r, rate), 0), yrTwo: yr(two), yrMo: yr(mo), yrAll: yr(on) };
+  }
+  const usdAed = (aed, rate, big) => '<b>AED ' + (big ? money0(aed) : money(aed)) + '</b><span>$' + (big ? money0(aed / rate) : money(aed / rate)) + '</span>';
+
   function renderPayments() {
     const title = 'Payments';
     if (!vault.key) return { title, sub: 'Locked', actions: '', html: '<div class="empty"><strong>Payments are locked</strong>They’re scrambled with your passphrase, so only you can read them.<div style="margin-top:14px"><button type="button" class="chipbtn solid" data-payunlock="1">' + I.lock + (vaultItem() ? 'Unlock' : 'Choose a passphrase') + '</button></div></div>' };
     const all = pays().sort((a, b) => (b.p.date || '').localeCompare(a.p.date || '') || (b.t.createdAt - a.t.createdAt));
     const tab = ui.payTab || 'topay'; if (!ui.paySel) ui.paySel = new Set();
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
-    let html = '<div class="ntabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
-    html += '<div class="pbar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button><span class="spacer"></span>' +
+    let html = '<div class="ntabs ptabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
+    const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button>' + (extra || '') + '<span class="spacer"></span>' +
       (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="ok">Approve</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
-      (tab !== 'runs' ? '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button>' : '') + '</div>';
-    if (tab === 'runs') {
-      const runs = payRuns(all), nx = nextPayroll(all);
-      if (nx && !runs.some(r => r.name === nx.name)) html += '<div class="pnext"><div><b>Next payroll: ' + esc(nx.name) + '</b><span class="psub">Pay date about ' + esc(payDate(nx.date)) + ' · same people and amounts as ' + esc(nx.from) + ', plus anything that didn’t go through</span></div><button type="button" class="chipbtn solid" data-payrun="' + esc(nx.from) + '">Set it up</button></div>';
-      html += '<div class="pbar"><button type="button" class="chipbtn" data-payrun="">' + I.plus + 'Payroll from scratch</button></div>';
-      if (!runs.length) html += empty('No payroll yet', 'Copy your last payroll rows from the sheet (Date to notes), click “Payroll from scratch” and paste. After that, Tally sets up each next payroll for you.');
-      runs.forEach(r => {
-        const open = ui.payOpen === r.name, paid = r.all.filter(x => x.p.status === 'paid' && !x.p.failed).length, bad = r.all.filter(x => x.p.failed && !x.p.redone).length, added = r.all.length - r.xs.length;
-        html += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(r.name) + '">' + I.chev + '<span class="pwho">' + esc(r.name) + '</span><span class="psub">Paid ' + esc(payDate(r.date)) + ' · ' + r.xs.length + ' people' + (added ? ' + ' + added + ' added' : '') + ' · ' + paid + ' paid' + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(r.all)) + '</span></button>' +
-          (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(r.name) + '">Copy for Excel</button><button type="button" class="chipbtn" data-payrun="' + esc(r.name) + '">Repeat…</button></div><div class="plist">' + r.all.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
-      });
-    } else {
+      '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
+    if (tab === 'runs') html += renderPayroll(all);
+    else if (tab === 'fc') html += renderForecast(all);
+    else {
+      html += bar();
       let xs = payFilter(tab, all);
       if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.check, x.p.run, x.p.note, x.p.chase, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
+      if (tab === 'topay') { // group a payroll's lines into one row
+        const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
+        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · pay date ' + esc(payDate(rs[0].p.date)) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
+        xs = loose;
+      }
       if (xs.length) html += '<div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
-      else html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, Pending and Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
+      else if (!(tab === 'topay' && payFilter('topay', all).length)) html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, payrolls you set up, and Pending or Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
     }
     const toPay = payFilter('topay', all);
     return { title, sub: toPay.length ? toPay.length + ' to pay · AED ' + money(payTotal(toPay)) : 'Nothing to pay', html, actions: lockBtn() };
   }
-  // Copy for Excel: the sheet's columns, in order: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
+
+  /* ---- Payroll tab: totals, what's next, roster, history ---- */
+  function renderPayroll(all) {
+    const cfg = payCfg(), T = payrollTotals(cfg), rate = T.rate, runs = payRuns(all);
+    let h = '';
+    if (cfg.roster.length) {
+      const moYr = T.yrMo * rate, twoYr = T.yrTwo * rate;
+      h += '<div class="pcards">' +
+        '<div class="pcard"><small>Every 2 weeks</small>' + usdAed(T.twoPay, rate) + '<em>' + T.two.length + ' people</em></div>' +
+        '<div class="pcard"><small>Per month</small>' + usdAed(twoYr / 12 + T.moPay, rate) + '<em>2-week staff ' + money0(twoYr / 12) + ' + month-end ' + money0(T.moPay) + '</em></div>' +
+        '<div class="pcard"><small>Per year</small>' + usdAed(twoYr + moYr, rate, true) + '<em>2-week ' + money0(twoYr) + ' + month-end ' + money0(moYr) + '</em></div></div>' +
+        '<p class="hint pcenter">AED at ' + rate + ' to the dollar. Monthly and yearly are from salaries in the roster (26 paydays a year for 2-week staff).</p>';
+    }
+    const nx = nextPayroll(all), today = new Date(), me = monthEndName(today);
+    if (nx && !runs.some(r => r.name === nx.name)) h += '<div class="pnext"><div><b>Next payroll: ' + esc(nx.name) + '</b><span class="psub">Pay date about ' + esc(payDate(nx.date)) + (cfg.roster.length ? ' · AED ' + money(T.twoPay) + ' from the roster' : ' · same people and amounts as ' + esc(nx.from)) + ', plus anything that didn’t go through</span></div><button type="button" class="chipbtn solid" data-paybasket="" data-kind="next">Set up basket</button></div>';
+    if (T.mo.length && !runs.some(r => r.name === me)) h += '<div class="pnext"><div><b>Month-end: ' + esc(monthName(today)) + '</b><span class="psub">' + T.mo.map(r => esc(payName(r))).join(', ') + ' · AED ' + money(T.moPay) + ' on ' + esc(payDate(D.toISO(lastOfMonth(today)))) + '</span></div><button type="button" class="chipbtn solid" data-paybasket="" data-kind="month">Set up basket</button></div>';
+    // roster
+    h += '<div class="psec"><h3>Roster <span class="n">' + cfg.roster.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-payrosterimport="1">Import roster</button><button type="button" class="chipbtn" data-payroster="1">Edit roster</button></div>';
+    if (!cfg.roster.length) h += '<p class="hint pcenter">Copy your payroll list from Excel (Name to Housing Allowance) and click “Import roster”. Then Tally works out every payroll, month and year, and forecasts the next ones.</p>';
+    else {
+      const last = runs.find(r => r.two), lastPaid = {}; (last ? last.xs : []).forEach(x => { lastPaid[x.p.payee] = (lastPaid[x.p.payee] || 0) + x.p.amount; });
+      const rows = cfg.roster.slice().sort((a, b) => (a.freq === 'mo') - (b.freq === 'mo') || payName(a).localeCompare(payName(b)));
+      h += '<div class="pscroll"><table class="ptable"><thead><tr><th>Name</th><th>Project</th><th>Sponsor</th><th>Start</th><th class="r">Yearly $</th><th class="r">Each pay AED</th><th class="r">Monthly AED</th><th class="r">Yearly AED</th><th>Last paid</th></tr></thead><tbody>' +
+        rows.map(r => {
+          const pp = perPay(r, rate), lp = lastPaid[payName(r)], off = r.freq !== 'mo' && lp !== undefined && Math.abs(lp - pp) > 1, open = ui.rosterOpen === r.id;
+          const hist = open ? all.filter(x => x.p.payee === payName(r)).slice(0, 12) : [];
+          return '<tr class="' + (r.active === false ? 'off' : '') + (open ? ' open' : '') + '" data-rosteropen="' + r.id + '"><td><b>' + esc(r.name) + '</b>' + (r.alias && r.alias !== r.name ? '<span class="psub">as ' + esc(r.alias) + '</span>' : '') + (r.freq === 'mo' ? '<span class="ptag">month-end</span>' : '') + '</td><td>' + esc(r.site || '') + '</td><td>' + esc(r.sponsor || '') + '</td><td>' + esc(r.start ? (sheetDate(r.start) ? payDate(sheetDate(r.start)) : r.start) : '') + '</td>' +
+            '<td class="r">' + money0(annUSD(r)) + '</td><td class="r"><b>' + money(pp) + '</b></td><td class="r">' + money(annUSD(r) * rate / 12) + '</td><td class="r">' + money0(annUSD(r) * rate) + '</td>' +
+            '<td>' + (r.freq === 'mo' ? '' : lp === undefined ? '<span class="psub">' + (last ? 'not in last payroll' : '') + '</span>' : '<span class="' + (off ? 'badtxt' : 'psub') + '">' + money(lp) + (off ? ' (differs)' : '') + '</span>') + '</td></tr>' +
+            (open ? '<tr class="phist"><td colspan="9">' + (hist.length ? hist.map(x => '<span>' + esc(payDate(x.p.date)) + ' · ' + esc(x.p.what || '') + ' · <b>' + money(x.p.amount) + '</b></span>').join('') : '<span class="psub">No payments to ' + esc(payName(r)) + ' yet</span>') + '</td></tr>' : '');
+        }).join('') + '</tbody><tfoot><tr><td colspan="5">2-week staff (' + T.two.length + ')</td><td class="r"><b>' + money(T.twoPay) + '</b></td><td class="r">' + money(T.yrTwo * rate / 12) + '</td><td class="r">' + money0(T.yrTwo * rate) + '</td><td></td></tr>' +
+        (T.mo.length ? '<tr><td colspan="5">Month-end staff (' + T.mo.length + ')</td><td class="r"><b>' + money(T.moPay) + '</b></td><td class="r">' + money(T.moPay) + '</td><td class="r">' + money0(T.yrMo * rate) + '</td><td></td></tr>' : '') + '</tfoot></table></div>' +
+        '<p class="hint pcenter">Click a person to see what they were paid. “Differs” means the last payroll paid a different amount than the roster: check the roster or the next basket.</p>';
+    }
+    // history
+    h += '<div class="psec"><h3>History <span class="n">' + runs.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-paybasket="" data-kind="blank">' + I.plus + 'Payroll from scratch</button></div>';
+    const tw = runs.filter(r => r.two).slice(0, 12).reverse();
+    if (tw.length > 1) { const mx = Math.max(...tw.map(r => payTotal(r.all))); h += '<div class="paychart" aria-label="2-week payroll totals">' + tw.map(r => '<div title="' + esc(r.name) + ': AED ' + money(payTotal(r.all)) + '"><i style="height:' + Math.max(4, Math.round(payTotal(r.all) / mx * 100)) + '%"></i><span>' + esc(payDate(r.date)) + '</span></div>').join('') + '</div>'; }
+    if (!runs.length) h += empty('No payroll yet', 'Import your sheet (“Import from sheet” in the To pay tab) or set up a payroll from scratch.');
+    runs.slice(0, ui.runLimit || 12).forEach(r => {
+      const open = ui.payOpen === r.name, paid = r.all.filter(x => x.p.status === 'paid' && !x.p.failed).length, bad = r.all.filter(x => x.p.failed && !x.p.redone).length, added = r.all.length - r.xs.length;
+      h += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(r.name) + '">' + I.chev + '<span class="pwho">' + esc(r.name) + '</span><span class="psub">Paid ' + esc(payDate(r.date)) + ' · ' + r.xs.length + ' people' + (added ? ' + ' + added + ' added' : '') + ' · ' + (paid === r.all.length ? 'all paid' : paid + ' paid') + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(r.all)) + '</span></button>' +
+        (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-paybasket="' + esc(r.name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(r.name) + '">Copy for Excel</button></div><div class="plist">' + r.all.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
+    });
+    if (runs.length > (ui.runLimit || 12)) h += '<div class="more-wrap"><button type="button" class="chipbtn" data-runmore="1">Show older</button></div>';
+    return h;
+  }
+
+  /* ---- the basket: a whole payroll in one table ---- */
+  // kind: 'next' (2-week payroll from the roster), 'month' (month-end staff), 'blank', or an existing payroll's name
+  function basketFor(kind) {
+    const all = pays(), cfg = payCfg(), rate = cfg.rate || 3.67, runs = payRuns(all);
+    if (kind !== 'next' && kind !== 'month' && kind !== 'blank') { // an existing payroll
+      const r = runs.find(x => x.name === kind); if (!r) return null;
+      return { name: r.name, date: r.date, edit: r.name, rows: r.all.map(x => ({ id: x.t.id, on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: x.p.extra ? x.p.what : '', info: x.p.status === 'paid' ? 'Paid' : '' })) };
+    }
+    if (kind === 'blank') return { name: '', date: todayISO(), rows: [] };
+    const carry = all.filter(x => x.p.run && x.p.failed && !x.p.redone).map(x => ({ carry: x.t.id, on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: (x.p.what || x.p.run) + ', ' + payDate(x.p.date) + ' payment did not go through', info: 'Didn’t go through' }));
+    if (kind === 'month') {
+      const d = lastOfMonth(new Date());
+      return { name: monthEndName(d), date: D.toISO(d), rows: cfg.roster.filter(r => r.active !== false && r.freq === 'mo').map(r => ({ on: true, payee: payName(r), site: r.site || '', amount: perPay(r, rate), what: '', info: 'Roster' })) };
+    }
+    const nx = nextPayroll(all), last = runs.find(r => r.two), lastPaid = {};
+    (last ? last.xs : []).forEach(x => { lastPaid[x.p.payee] = x.p; });
+    const rows = [], seen = new Set();
+    cfg.roster.filter(r => r.active !== false && r.freq !== 'mo').forEach(r => {
+      const nm = payName(r), lp = lastPaid[nm], pp = perPay(r, rate), st = sheetDate(r.start); seen.add(nm);
+      const info = /tbd/i.test(r.start || '') ? 'Start date TBD' : st && nx && st > D.toISO(nx.start) ? 'Starts ' + payDate(st) + ': full pay assumed' : !lp ? 'New: not in the last payroll' : Math.abs(lp.amount - pp) > 1 ? 'Last paid ' + money(lp.amount) : '';
+      rows.push({ on: !/tbd/i.test(r.start || ''), payee: nm, site: r.site || (lp && lp.site) || '', amount: pp, what: '', info, warn: !!info });
+    });
+    if (!cfg.roster.length) (last ? last.xs : []).forEach(x => rows.push({ on: true, payee: x.p.payee, site: x.p.site, amount: x.p.amount, what: '', info: '' }));
+    else Object.values(lastPaid).forEach(p => { if (!seen.has(p.payee)) rows.push({ on: false, payee: p.payee, site: p.site, amount: p.amount, what: '', info: 'Not on the roster', warn: true }); });
+    return { name: nx ? nx.name : '', date: nx ? nx.date : todayISO(), rows: rows.concat(carry) };
+  }
+  function basketRowHtml(r, i) {
+    return '<tr data-bi="' + i + '"' + (r.on ? '' : ' class="off"') + (r.id ? ' data-id="' + r.id + '"' : '') + (r.carry ? ' data-carry="' + r.carry + '"' : '') + '>' +
+      '<td><input type="checkbox" class="b-on"' + (r.on ? ' checked' : '') + ' aria-label="Include"></td>' +
+      '<td><input class="ctl b-payee" value="' + esc(r.payee) + '" aria-label="Name"></td>' +
+      '<td><input class="ctl b-site" value="' + esc(r.site) + '" list="pfSites" aria-label="Project"></td>' +
+      '<td><input class="ctl b-amt r" value="' + (r.amount === '' ? '' : money(r.amount)) + '" inputmode="decimal" aria-label="Amount"></td>' +
+      '<td><input class="ctl b-what" value="' + esc(r.what) + '" placeholder="regular pay" aria-label="Note"></td>' +
+      '<td class="b-info' + (r.warn ? ' warn' : '') + '">' + esc(r.info || '') + '</td>' +
+      '<td><button type="button" class="iconbtn" data-brm="1" aria-label="Remove line" title="Remove line">' + I.x + '</button></td></tr>';
+  }
+  function openBasket(kind) {
+    const b = basketFor(kind); if (!b) return;
+    ui.basket = { edit: b.edit || null, kind };
+    $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="bkTitle"><div class="sheet-head"><h2 id="bkTitle">' + (b.edit ? 'Edit payroll' : kind === 'month' ? 'Month-end payroll' : 'Payroll basket') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
+      '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
+      '<div class="pgrid"><div class="field"><label for="bk_name">' + (kind === 'month' ? 'Name' : 'Pay period') + '</label><input class="ctl" id="bk_name" value="' + esc(b.name) + '" placeholder="Nov 8 to Nov 21" autocomplete="off"' + (b.edit ? ' readonly' : '') + '></div><div class="field"><label for="bk_date">Pay date</label><input class="ctl" type="date" id="bk_date" value="' + esc(b.date) + '"></div></div>' +
+      (kind === 'next' ? '<p class="hint">Amounts come from the roster. Yellow notes need a look. Untick anyone not being paid. Add a line for an expense or a missed payment, and say what it’s for in Note.</p>' : '') +
+      '<div class="pscroll"><table class="btable"><thead><tr><th></th><th>Name</th><th>Project</th><th class="r">Amount AED</th><th>Note (leave empty for regular pay)</th><th></th><th></th></tr></thead><tbody id="bkRows">' + b.rows.map(basketRowHtml).join('') + '</tbody></table></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn" data-badd="1">' + I.plus + 'Add line</button><button type="button" class="chipbtn" data-bpaste="1">Paste from Excel</button><span class="spacer"></span><b id="bkSum"></b></div>' +
+      '<div id="bkPaste" hidden><textarea class="ctl" id="bk_paste" rows="5" placeholder="Copy rows from your sheet (Date to notes) or Name, Project, Amount lines, and paste here"></textarea><div class="pform-acts"><button type="button" class="chipbtn" data-bpasteadd="1">Add these lines</button></div></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-bsave="1">' + (b.edit ? 'Save changes' : 'Add to To pay') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="bkMsg"></span></div></div></div>';
+    $('#sheet').hidden = false; basketSum();
+  }
+  function basketRead() {
+    return [...document.querySelectorAll('#bkRows tr')].map(tr => ({ id: tr.dataset.id || null, carry: tr.dataset.carry || null, on: $('.b-on', tr).checked, payee: $('.b-payee', tr).value.trim(), site: $('.b-site', tr).value.trim(), amount: toNum($('.b-amt', tr).value), what: $('.b-what', tr).value.trim() }));
+  }
+  function basketSum() {
+    const el = $('#bkSum'); if (!el) return; const rs = basketRead().filter(r => r.on && r.amount > 0), tot = rs.reduce((s, r) => s + r.amount, 0);
+    el.textContent = rs.length + ' paid · AED ' + money(tot) + ' · $' + money(tot / rateOf());
+    document.querySelectorAll('#bkRows tr').forEach(tr => tr.classList.toggle('off', !$('.b-on', tr).checked));
+  }
+  async function basketSave() {
+    const name = $('#bk_name').value.trim(), date = $('#bk_date').value || todayISO(), rows = basketRead(), edit = ui.basket && ui.basket.edit;
+    if (!name) { $('#bkMsg').textContent = 'Type the pay period, like Nov 8 to Nov 21.'; return; }
+    if (!edit && pays().some(x => x.p.run === name)) { $('#bkMsg').textContent = 'There’s already a payroll with that name. Open it from History to edit it.'; return; }
+    const use = rows.filter(r => r.on);
+    if (use.some(r => !r.payee || !(r.amount > 0))) { $('#bkMsg').textContent = 'Every ticked line needs a name and an amount.'; return; }
+    if (!use.length) { $('#bkMsg').textContent = 'Tick at least one person.'; return; }
+    if (!(await needVault())) return;
+    snapshot();
+    const keep = new Set();
+    for (const r of use) {
+      const fields = { payee: r.payee, site: r.site, amount: r.amount, what: r.what || name, extra: !!r.what, run: name };
+      const t = r.id && taskById(r.id), p = t && payOf(t);
+      if (p) { Object.assign(p, fields); if (p.status !== 'paid') p.date = date; keep.add(t.id); }
+      else await addPayment(Object.assign({ date }, fields));
+      if (r.carry) { const ct = taskById(r.carry), cp = ct && payOf(ct); if (cp) cp.redone = true; }
+    }
+    if (edit) pays().filter(x => x.p.run === edit && !keep.has(x.t.id)).forEach(x => trashTask(x.t));
+    save(); closeSheet(); ui.basket = null; ui.payTab = 'topay'; render(); toast(edit ? 'Payroll saved' : use.length + ' payments added to To pay', true);
+  }
+  // Payroll lines from Excel: the sheet's rows (Date … notes), or Name, Project, Amount[, what it's for]
+  function parseRunLines(text) {
+    return String(text || '').split(/\r?\n/).filter(l => l.trim()).map(l => {
+      const raw = l.split('\t');
+      if (raw.length >= 7 && (isAmt(raw[6]) || isAmt(raw[5]))) return { payee: raw[1].trim(), site: (raw[3] || '').trim(), what: '', amount: toNum(isAmt(raw[6]) ? raw[6] : raw[5]) };
+      const cells = (raw.length > 1 ? raw : /\s{2,}/.test(l.trim()) ? l.split(/\s{2,}/) : l.split(',')).map(c => c.trim());
+      let ai = -1; for (let i = 1; i < cells.length; i++) if (isAmt(cells[i])) { ai = i; break; }
+      if (ai < 0) return null;
+      return { payee: cells[0], site: cells.slice(1, ai).filter(Boolean)[0] || '', amount: toNum(cells[ai]), what: cells.slice(ai + 1).filter(Boolean).join(' ') };
+    }).filter(Boolean);
+  }
+
+  /* ---- roster ---- */
+  // Rows copied from the payroll list: Name, Start Date, Length of Service, Sponsor, Annual Salary, Housing Allowance (a row number first is fine)
+  function parseRoster(text) {
+    return String(text || '').split(/\r?\n/).map(l => l.split('\t').map(c => c.trim())).filter(c => c.some(Boolean) && !c.some(x => /^annual salary$/i.test(x))).map(c => {
+      const si = c.findIndex((x, i) => i > 0 && /\$|^[\d,]+\.\d{2}$/.test(x) && toNum(x) > 500); if (si < 0) return null;
+      const ni = c.findIndex(x => /[A-Za-z]{2}/.test(x) && !sheetDate(x) && !/^tbd$/i.test(x)); if (ni < 0 || ni >= si) return null;
+      const di = c.findIndex((x, i) => i > ni && i < si && (sheetDate(x) || /^tbd$/i.test(x)));
+      const sp = c.slice(ni + 1, si).filter(x => x && !sheetDate(x) && !/^tbd$/i.test(x) && !/year|month|day|#value/i.test(x)).pop() || '';
+      return { name: c[ni], start: di >= 0 ? c[di] : '', sponsor: sp, usd: toNum(c[si]), housing: isAmt(c[si + 1]) ? toNum(c[si + 1]) : 0 };
+    }).filter(Boolean);
+  }
+  function openRosterImport() {
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="riTitle"><div class="sheet-head"><h2 id="riTitle">Import roster</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
+      '<ol class="howto"><li>In Excel, select the payroll list from <b>Name</b> across to <b>Housing Allowance</b> (the header row too is fine).</li><li>Press <b>Ctrl+C</b>, click the box below and press <b>Ctrl+V</b>.</li></ol>' +
+      '<p class="hint">This replaces the 2-week staff in the roster. Month-end staff you’ve added stay. Each person is matched to how they’re written in past payrolls.</p>' +
+      '<div class="field"><label for="ri_rows">Payroll list</label><textarea class="ctl" id="ri_rows" rows="10"></textarea></div><p class="hint" id="riSum"></p>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-rosterimportgo="1">Import</button><button type="button" class="chipbtn" data-close="1">Cancel</button></div></div></div>';
+    $('#sheet').hidden = false; setTimeout(() => $('#ri_rows') && $('#ri_rows').focus(), 30);
+  }
+  function rosterPlan() {
+    const all = pays(), runs = payRuns(all), names = [...new Set(runs.filter(r => r.two).slice(0, 6).flatMap(r => r.xs.map(x => x.p.payee)))], last = runs.find(r => r.two);
+    const siteOf = nm => { const x = last && last.xs.find(x => x.p.payee === nm) || all.find(x => x.p.payee === nm && x.p.site); return x ? x.p.site : ''; };
+    const old = payCfg().roster;
+    return parseRoster($('#ri_rows').value).map(r => { const was = old.find(o => normName(o.name) === normName(r.name)) || {}; const alias = was.alias || matchName(r.name, names); return Object.assign({ id: was.id || uid(), freq: '2w', active: true, site: was.site || siteOf(alias) }, r, { alias: alias && alias !== r.name ? alias : (was.alias || '') }); });
+  }
+  function rosterImportSum() {
+    const el = $('#riSum'); if (!el) return; const rs = rosterPlan(), rate = rateOf(), tot = rs.reduce((s, r) => s + perPay(r, rate), 0), unmatched = rs.filter(r => !r.alias && !pays().some(x => x.p.payee === r.name));
+    el.innerHTML = rs.length ? '<b>' + rs.length + ' people</b> · every 2 weeks AED ' + money(tot) + ' · per year $' + money0(rs.reduce((s, r) => s + annUSD(r), 0)) + (unmatched.length ? '<br>Not found in past payrolls (new, or written differently): ' + unmatched.map(r => esc(r.name)).join(', ') + '. You can set “Name in payroll” in Edit roster.' : '') : '';
+  }
+  async function rosterImportSave() {
+    const rs = rosterPlan(); if (!rs.length) return;
+    if (!(await needVault())) return;
+    snapshot(); await setPayCfg({ roster: payCfg().roster.filter(r => r.freq === 'mo').concat(rs) });
+    closeSheet(); render(); toast(rs.length + ' people in the roster', true);
+  }
+  const ROSTER_COLS = [['name', 'Name'], ['alias', 'Name in payroll'], ['site', 'Project'], ['sponsor', 'Sponsor'], ['start', 'Start'], ['freq', 'Paid'], ['usd', 'Yearly salary $'], ['housing', 'Housing $']];
+  function rosterRowHtml(r) {
+    return '<tr data-rid="' + (r.id || uid()) + '"' + (r.active === false ? ' class="off"' : '') + '><td><input type="checkbox" class="r-on"' + (r.active === false ? '' : ' checked') + ' aria-label="On payroll"></td>' +
+      ROSTER_COLS.map(([k, l]) => '<td>' + (k === 'freq' ? '<select class="ctl r-freq" aria-label="' + l + '"><option value="2w"' + (r.freq !== 'mo' ? ' selected' : '') + '>Every 2 weeks</option><option value="mo"' + (r.freq === 'mo' ? ' selected' : '') + '>Month-end</option></select>' : '<input class="ctl r-' + k + ((k === 'usd' || k === 'housing') ? ' r' : '') + '" value="' + esc(k === 'usd' || k === 'housing' ? (r[k] ? money(r[k]) : '') : r[k] || '') + '"' + (k === 'site' ? ' list="pfSites"' : '') + ' aria-label="' + l + '">') + '</td>').join('') +
+      '<td class="r-pay r"></td><td><button type="button" class="iconbtn" data-rrm="1" aria-label="Remove person" title="Remove person">' + I.x + '</button></td></tr>';
+  }
+  function openRoster() {
+    const cfg = payCfg();
+    $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="roTitle"><div class="sheet-head"><h2 id="roTitle">Roster</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
+      '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
+      '<p class="hint">Salaries are yearly in US dollars, like your sheet. For someone paid a fixed amount in dirhams, type it like <b>4000 AED/mo</b>. “Name in payroll” is how they’re written in the cash-flow sheet, if different. Untick someone who has left.</p>' +
+      '<div class="pscroll"><table class="btable"><thead><tr><th></th>' + ROSTER_COLS.map(([k, l]) => '<th' + (k === 'usd' || k === 'housing' ? ' class="r"' : '') + '>' + l + '</th>').join('') + '<th class="r">Each pay AED</th><th></th></tr></thead><tbody id="roRows">' + cfg.roster.map(rosterRowHtml).join('') + '</tbody></table></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn" data-radd="1">' + I.plus + 'Add person</button><span class="spacer"></span><label class="hint">Dirhams per dollar <input class="ctl rate" id="ro_rate" value="' + (cfg.rate || 3.67) + '" inputmode="decimal"></label></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-rsave="1">Save roster</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="spacer"></span><b id="roSum"></b></div></div></div>';
+    $('#sheet').hidden = false; rosterSum();
+  }
+  function rosterRead() {
+    const rate = toNum($('#ro_rate').value) || 3.67;
+    return [...document.querySelectorAll('#roRows tr')].map(tr => { const g = k => $('.r-' + k, tr).value.trim(); return { id: tr.dataset.rid, active: $('.r-on', tr).checked, name: g('name'), alias: g('alias'), site: g('site'), sponsor: g('sponsor'), start: g('start'), freq: $('.r-freq', tr).value, usd: usdIn(g('usd'), rate), housing: usdIn(g('housing'), rate) }; });
+  }
+  function rosterSum() {
+    const el = $('#roSum'); if (!el) return; const rate = toNum($('#ro_rate').value) || 3.67, rs = rosterRead();
+    document.querySelectorAll('#roRows tr').forEach((tr, i) => { $('.r-pay', tr).textContent = rs[i].usd ? money(perPay(rs[i], rate)) : ''; tr.classList.toggle('off', !rs[i].active); });
+    const on = rs.filter(r => r.active && r.name), two = on.filter(r => r.freq !== 'mo');
+    el.textContent = two.length + ' every 2 weeks: AED ' + money(two.reduce((s, r) => s + perPay(r, rate), 0)) + ' · per year $' + money0(on.reduce((s, r) => s + annUSD(r), 0));
+  }
+  async function rosterSave() {
+    const rate = toNum($('#ro_rate').value) || 3.67, rs = rosterRead().filter(r => r.name);
+    if (!(await needVault())) return;
+    snapshot(); await setPayCfg({ roster: rs, rate }); closeSheet(); render(); toast('Roster saved', true);
+  }
+
+  /* ---- Forecast: payroll from the roster, month-end staff, repeating payments, To pay items ---- */
+  const EVERY = [['2w', 'Every 2 weeks'], ['mo', 'Monthly'], ['q', 'Every 3 months'], ['6m', 'Every 6 months'], ['y', 'Yearly'], ['once', 'Once']];
+  const EVERY_NAME = Object.fromEntries(EVERY);
+  const stepDate = (d, every) => every === '2w' ? D.addDays(d, 14) : D.addMonths(d, { mo: 1, q: 3, '6m': 6, y: 12 }[every] || 1);
+  function forecastEvents(all, months) {
+    const cfg = payCfg(), rate = cfg.rate || 3.67, T = payrollTotals(cfg), today = D.startOfDay(new Date()), endD = D.addMonths(today, months), runs = payRuns(all), ev = [];
+    const add = (d, label, amt, kind) => { if (d >= today && d <= endD) ev.push({ d, label, amt, kind }); };
+    // already set up and not paid yet (To pay), including Pending and Due rows
+    all.filter(x => x.p.status === 'req' || x.p.status === 'ok').forEach(x => { const d = x.p.date ? D.fromISO(x.p.date) : today; add(d < today ? today : d, (x.p.payee || x.p.what || 'Payment') + (x.p.run ? ' (payroll ' + x.p.run + ')' : ''), (x.p.dir === 'in' ? 1 : -1) * x.p.amount, x.p.run ? 'pay' : 'other'); });
+    // 2-week payroll: from the roster (new people at full pay), or the last payroll if there's no roster
+    const nx = nextPayroll(all), last = runs.find(r => r.two), twoAmt = cfg.roster.length ? T.twoPay : last ? payTotal(last.xs) : 0;
+    if (nx && twoAmt) for (let d = D.fromISO(nx.date); d <= endD; d = D.addDays(d, 14)) { if (!runs.some(r => r.date && Math.abs(D.diffDays(D.fromISO(r.date), d)) <= 5)) add(d, 'Payroll (every 2 weeks)', -twoAmt, 'pay'); }
+    // month-end staff
+    if (T.moPay) for (let m = 0; m <= months; m++) { const d = lastOfMonth(D.addMonths(new Date(today.getFullYear(), today.getMonth(), 1), m)); if (!runs.some(r => r.name === monthEndName(d))) add(d, 'Month-end pay (' + T.mo.length + ')', -T.moPay, 'mo'); }
+    // repeating payments and money coming in
+    cfg.recurring.forEach(r => { if (!r.next || !(r.amount > 0)) return; let d = D.fromISO(r.next); const until = r.until ? D.fromISO(r.until) : null; for (let n = 0; n < 400 && d <= endD && (!until || d <= until); n++) { add(d, r.name, (r.dir === 'in' ? 1 : -1) * r.amount, r.dir === 'in' ? 'in' : 'other'); if (r.every === 'once') break; d = stepDate(d, r.every); } });
+    return ev.sort((a, b) => a.d - b.d);
+  }
+  function renderForecast(all) {
+    const cfg = payCfg(), rate = cfg.rate || 3.67, months = ui.fcMonths || 12, ev = forecastEvents(all, months), today = D.startOfDay(new Date());
+    const bal = cfg.balance == null ? null : Number(cfg.balance);
+    let h = '<div class="pbal"><label for="fcBal">Bank balance today (AED)</label><input class="ctl r" id="fcBal" inputmode="decimal" value="' + (bal == null ? '' : money(bal)) + '" placeholder="e.g. 218,713.45"><span class="hint">' + (cfg.balanceDate ? 'Entered ' + esc(payDate(cfg.balanceDate)) : 'Type it from the bank or your sheet, then press Enter') + '</span><span class="spacer"></span><select class="ctl" id="fcMonths" aria-label="How far ahead">' + [3, 6, 12, 24].map(m => '<option value="' + m + '"' + (m === months ? ' selected' : '') + '>Next ' + m + ' months</option>').join('') + '</select></div>';
+    // month by month
+    const rows = []; let run = bal || 0;
+    for (let m = 0; m < months; m++) {
+      const ms = new Date(today.getFullYear(), today.getMonth() + m, 1), me = lastOfMonth(ms), es = ev.filter(e => e.d >= ms && e.d <= me);
+      const sum = k => es.filter(e => e.kind === k).reduce((s, e) => s + e.amt, 0), net = es.reduce((s, e) => s + e.amt, 0); run += net;
+      rows.push({ ms, pay: sum('pay'), mo: sum('mo'), other: sum('other'), inn: sum('in'), net, end: run });
+    }
+    const low = bal == null ? null : rows.reduce((a, r) => r.end < a.end ? r : a, rows[0]);
+    if (bal != null && low && low.end < 0) h += '<div class="pwarn">The balance goes below zero in <b>' + esc(monthName(low.ms)) + '</b> (AED ' + money(low.end) + ').</div>';
+    h += '<div class="pscroll"><table class="ptable fc"><thead><tr><th>Month</th><th class="r">Payroll</th><th class="r">Month-end</th><th class="r">Other payments</th><th class="r">Money in</th><th class="r">Net</th><th class="r">' + (bal == null ? 'Running total' : 'Balance at month end') + '</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td>' + esc(monthName(r.ms)) + '</td><td class="r">' + money0(-r.pay) + '</td><td class="r">' + money0(-r.mo) + '</td><td class="r">' + money0(-r.other) + '</td><td class="r in">' + money0(r.inn) + '</td><td class="r' + (r.net < 0 ? ' neg' : '') + '">' + money0(r.net) + '</td><td class="r' + (r.end < 0 ? ' neg' : '') + '"><b>' + money0(r.end) + '</b><span class="psub">$' + money0(r.end / rate) + '</span></td></tr>').join('') + '</tbody></table></div>' +
+      '<p class="hint pcenter">Payroll uses the roster (new people at full 2-week pay). Payrolls and payments already in To pay are counted on their date instead.</p>';
+    // repeating payments
+    const rec = cfg.recurring.slice().sort((a, b) => (a.next || '').localeCompare(b.next || ''));
+    h += '<div class="psec"><h3>Repeating payments <span class="n">' + rec.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-recfind="1">Find them in my history</button><button type="button" class="chipbtn" data-recedit="1">Edit</button></div>';
+    h += rec.length ? '<div class="pscroll"><table class="ptable"><thead><tr><th>What</th><th>How often</th><th>Next</th><th class="r">AED</th></tr></thead><tbody>' + rec.map(r => '<tr><td>' + esc(r.name) + (r.until ? '<span class="psub">until ' + esc(payDate(r.until)) + '</span>' : '') + '</td><td>' + esc(EVERY_NAME[r.every] || '') + '</td><td>' + esc(payDate(r.next)) + '</td><td class="r' + (r.dir === 'in' ? ' in' : '') + '">' + (r.dir === 'in' ? '+' : '') + money(r.amount) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<p class="hint pcenter">Add rents, allowances, insurance and money coming in. “Find them in my history” suggests the ones that repeat in your imported sheet.</p>';
+    // the next 8 weeks, item by item
+    const soon = ev.filter(e => e.d <= D.addDays(today, 56)); let b2 = bal || 0;
+    h += '<div class="psec"><h3>Next 8 weeks</h3></div>' + (soon.length ? '<div class="plist">' + soon.map(e => { b2 += e.amt; return '<div class="prow fcrow"><span class="pdate">' + esc(payDate(D.toISO(e.d))) + '</span><span class="pmain"><span class="pwho">' + esc(e.label) + '</span></span><span class="pamt' + (e.amt > 0 ? ' in' : '') + '">' + (e.amt > 0 ? '+' : '') + money(e.amt) + '</span><span class="pamt psub' + (b2 < 0 ? ' neg' : '') + '">' + (bal == null ? '' : money(b2)) + '</span></div>'; }).join('') + '</div>' : '<p class="hint pcenter">Nothing coming up.</p>');
+    return h;
+  }
+  function recRowHtml(r) {
+    return '<tr data-rid="' + (r.id || uid()) + '"><td><input class="ctl c-name" value="' + esc(r.name || '') + '" placeholder="e.g. Quarterly rent" aria-label="What"></td>' +
+      '<td><select class="ctl c-dir" aria-label="In or out"><option value="out"' + (r.dir !== 'in' ? ' selected' : '') + '>Out</option><option value="in"' + (r.dir === 'in' ? ' selected' : '') + '>In</option></select></td>' +
+      '<td><input class="ctl c-amt r" value="' + (r.amount ? money(r.amount) : '') + '" inputmode="decimal" aria-label="Amount AED"></td>' +
+      '<td><select class="ctl c-every" aria-label="How often">' + EVERY.map(([k, l]) => '<option value="' + k + '"' + ((r.every || 'mo') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
+      '<td><input class="ctl c-next" type="date" value="' + esc(r.next || '') + '" aria-label="Next date"></td><td><input class="ctl c-until" type="date" value="' + esc(r.until || '') + '" aria-label="Until"></td>' +
+      '<td><button type="button" class="iconbtn" data-crm="1" aria-label="Remove" title="Remove">' + I.x + '</button></td></tr>';
+  }
+  function openRecurring(add) {
+    const rs = payCfg().recurring.concat(add || []);
+    $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="reTitle"><div class="sheet-head"><h2 id="reTitle">Repeating payments</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
+      '<p class="hint">Payroll comes from the roster, so don’t add it here. Add rents, allowances, insurance, fees, and money that comes in regularly. Leave Until empty if it keeps going.</p>' +
+      '<div class="pscroll"><table class="btable"><thead><tr><th>What</th><th>In / out</th><th class="r">Amount AED</th><th>How often</th><th>Next date</th><th>Until</th><th></th></tr></thead><tbody id="reRows">' + (rs.length ? rs : [{}]).map(recRowHtml).join('') + '</tbody></table></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn" data-cadd="1">' + I.plus + 'Add line</button></div>' +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-csave="1">Save</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="reMsg"></span></div></div></div>';
+    $('#sheet').hidden = false;
+  }
+  async function recSave() {
+    const rs = [...document.querySelectorAll('#reRows tr')].map(tr => ({ id: tr.dataset.rid, name: $('.c-name', tr).value.trim(), dir: $('.c-dir', tr).value, amount: toNum($('.c-amt', tr).value), every: $('.c-every', tr).value, next: $('.c-next', tr).value, until: $('.c-until', tr).value })).filter(r => r.name || r.amount > 0);
+    if (rs.some(r => !r.name || !(r.amount > 0) || !r.next)) { $('#reMsg').textContent = 'Each line needs what it is, an amount and a next date.'; return; }
+    if (!(await needVault())) return;
+    snapshot(); await setPayCfg({ recurring: rs }); closeSheet(); render(); toast('Repeating payments saved', true);
+  }
+  // Suggest repeating payments from history: same name and amount, at a steady gap (2 weeks, a month, 3 or 6 months, a year)
+  function findRecurring() {
+    const cfg = payCfg(), have = new Set(cfg.recurring.map(r => normName(r.name) + '|' + Math.round(r.amount))), rosterNames = new Set(cfg.roster.map(r => normName(payName(r))));
+    const g = new Map(); pays().filter(x => !x.p.run && x.p.date && x.p.amount >= 100 && x.p.status === 'paid' && !x.p.failed).forEach(x => { const nm = x.p.payee || x.p.what || (x.p.dir === 'in' ? 'Money in' : 'Payment'); const k = normName(nm) + '|' + x.p.dir + '|' + Math.round(x.p.amount); if (!g.has(k)) g.set(k, { name: nm, dir: x.p.dir, amount: x.p.amount, ds: [] }); g.get(k).ds.push(x.p.date); });
+    const today = D.startOfDay(new Date()), out = [];
+    g.forEach(v => {
+      const ds = [...new Set(v.ds)].sort(); if (ds.length < 2) return;
+      const gaps = ds.slice(1).map((d, i) => D.diffDays(D.fromISO(d), D.fromISO(ds[i]))).slice(-4).sort((a, b) => a - b), gap = gaps[Math.floor((gaps.length - 1) / 2)]; // the recent pattern
+      const every = gap >= 12 && gap <= 16 ? '2w' : gap >= 26 && gap <= 35 ? 'mo' : gap >= 80 && gap <= 100 ? 'q' : gap >= 170 && gap <= 195 ? '6m' : gap >= 350 && gap <= 380 ? 'y' : '';
+      if (!every || (ds.length < 3 && (every === '2w' || every === 'mo'))) return;
+      if (have.has(normName(v.name) + '|' + Math.round(v.amount)) || rosterNames.has(normName(v.name))) return;
+      let nx = stepDate(D.fromISO(ds[ds.length - 1]), every); while (nx < today) nx = stepDate(nx, every);
+      if (D.diffDays(today, D.fromISO(ds[ds.length - 1])) > 400) return; // stopped long ago
+      out.push({ id: uid(), name: v.name, dir: v.dir, amount: v.amount, every, next: D.toISO(nx), until: '', seen: ds.length, last: ds[ds.length - 1] });
+    });
+    return out.sort((a, b) => b.amount - a.amount);
+  }
+  function openRecFind() {
+    const fs = findRecurring(); ui.recFound = fs;
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="rfTitle"><div class="sheet-head"><h2 id="rfTitle">Repeating payments in your history</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
+      (fs.length ? '<p class="hint">Tick the ones that will keep happening. You can change amounts and dates on the next screen.</p><div class="plist">' + fs.map((f, i) => '<label class="prow fcrow"><input type="checkbox" class="pchk" data-rf="' + i + '"><span class="pmain"><span class="pwho">' + esc(f.name) + '</span><span class="psub">' + esc(EVERY_NAME[f.every]) + ' · seen ' + f.seen + ' times, last ' + esc(payDate(f.last)) + ' · next ' + esc(payDate(f.next)) + '</span></span><span class="pamt' + (f.dir === 'in' ? ' in' : '') + '">' + (f.dir === 'in' ? '+' : '') + money(f.amount) + '</span></label>').join('') + '</div>' : '<p>Nothing repeats steadily in your history yet. Import more of your sheet, or add them by hand.</p>') +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-rfgo="1"' + (fs.length ? '' : ' disabled') + '>Next</button><button type="button" class="chipbtn" data-close="1">Cancel</button></div></div></div>';
+    $('#sheet').hidden = false;
+  }
+
+  /* ---- Copy for Excel ---- */
+  // The sheet's columns, in order: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
   // Balance is a formula that works on whatever row it's pasted into: the row above + Deposit - Check.
   // A transfer that didn't go through is written the sheet's way: the amount as both Deposit and Check, with a note.
   const XL_BAL = '=INDIRECT("R[-1]C",FALSE)+N(INDIRECT("RC[-2]",FALSE))-N(INDIRECT("RC[-1]",FALSE))';
@@ -2949,7 +3281,9 @@
     const done = () => toast(rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' copied. In Excel, click the Date cell of the first empty row and press Ctrl+V.');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(rows.join('\r\n')).then(done, () => toast('Couldn’t copy. Try again.')); else toast('Copying isn’t available here.');
   }
-  const siteList = () => [...new Set(pays().map(x => x.p.site).filter(Boolean))].sort();
+  const siteList = () => [...new Set(pays().map(x => x.p.site).filter(Boolean).concat(payCfg().roster.map(r => r.site).filter(Boolean)))].sort();
+
+  /* ---- one payment ---- */
   function openPayForm(id) {
     const raw = id && taskById(id), p = raw ? payOf(raw) : Object.assign(BLANK_PAY(), { amount: '' });
     if (!p) return;
@@ -2962,12 +3296,12 @@
       f('date', 'Date', '<input class="ctl" type="date" id="pf_date" value="' + esc(p.date || '') + '">') + f('dir', 'Column', '<select class="ctl" id="pf_dir">' + opt([['out', 'Check (money out)'], ['in', 'Deposit (money in)']], p.dir) + '</select>') +
       inp('site', 'Project', 'list="pfSites" autocomplete="off"') + inp('check', 'Check #', 'autocomplete="off"') + '</div>' +
       inp('what', 'Description / Invoice #', 'autocomplete="off"') +
-      '<div class="pgrid">' + f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') +
-      inp('run', 'Payroll', 'autocomplete="off" placeholder="Leave empty if not payroll"') + '<div></div></div>' +
+      '<div class="pgrid">' + f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') + '</div>' +
       '<label class="pcheck"><input type="checkbox" id="pf_failed"' + (p.failed ? ' checked' : '') + '> The transfer didn’t go through</label>' +
       (p.failed ? '<label class="pcheck"><input type="checkbox" id="pf_redone"' + (p.redone ? ' checked' : '') + '> Paid again since</label>' : '') +
       inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paycheck short by one day"') +
       f('note', 'Notes (copied to the sheet)', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
+      (p.run ? '<p class="hint">Part of payroll ' + esc(p.run) + '.</p>' : '') +
       '<div class="pform-acts"><button type="button" class="chipbtn solid" data-paysave="1">Save</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="pfMsg"></span><span class="spacer"></span>' + (raw ? '<button type="button" class="danger-btn" data-paydel="' + raw.id + '">Delete</button>' : '') + '</div></div></div>';
     $('#sheet').hidden = false; setTimeout(() => $('#pf_payee') && $('#pf_payee').focus(), 30);
   }
@@ -2976,68 +3310,24 @@
     const v = k => $('#pf_' + k).value.trim(), amt = toNum(v('amount'));
     if (!v('payee') && !v('what')) { $('#pfMsg').textContent = 'Add who it’s for or a description.'; return; }
     if (!isFinite(amt) || amt <= 0) { $('#pfMsg').textContent = 'Type the amount, like 1500.00'; return; }
-    if (!vault.key && !(await needVault())) return;
-    const fields = { date: v('date') || todayISO(), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), run: v('run'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
+    if (!(await needVault())) return;
+    const fields = { date: v('date') || todayISO(), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
     snapshot();
     const raw = form.dataset.payid && taskById(form.dataset.payid);
     if (raw) Object.assign(payOf(raw), fields); else await addPayment(fields);
     save(); closeSheet(); render(); toast(raw ? 'Payment saved' : 'Payment added', true);
   }
-  // Payroll lines: Name, Project, Amount, then an optional description (for added lines).
-  // Rows copied straight from the sheet (Date … notes) work too.
-  function parseRunLines(text) {
-    return String(text || '').split(/\r?\n/).filter(l => l.trim()).map(l => {
-      const raw = l.split('\t');
-      if (raw.length >= 7 && (isAmt(raw[6]) || isAmt(raw[5]))) return { payee: raw[1].trim(), site: (raw[3] || '').trim(), what: (raw[4] || '').trim(), amount: toNum(isAmt(raw[6]) ? raw[6] : raw[5]), sheet: true };
-      const cells = (raw.length > 1 ? raw : /\s{2,}/.test(l.trim()) ? l.split(/\s{2,}/) : l.split(',')).map(c => c.trim());
-      let ai = -1; for (let i = 1; i < cells.length; i++) if (isAmt(cells[i])) { ai = i; break; }
-      if (ai < 0) return { bad: l.trim() };
-      return { payee: cells[0], site: cells.slice(1, ai).filter(Boolean)[0] || '', amount: toNum(cells[ai]), what: cells.slice(ai + 1).filter(Boolean).join(' ') };
-    });
-  }
-  function openRunForm(from) {
-    const all = pays(), nx = from ? nextPayroll(all) : null, src = from ? all.filter(x => x.p.run === from && !x.p.extra) : [];
-    const name = from ? (nx && nx.from === from ? nx.name : (() => { const r = payRuns(all).find(r => r.name === from), pd = r && periodDates(r.name, r.date); return pd ? periodLabel(D.addDays(pd.end, 1), D.addDays(pd.end, 14)) : ''; })()) : '';
-    const r0 = from && payRuns(all).find(r => r.name === from), date = r0 && r0.date ? D.toISO(D.addDays(D.fromISO(r0.date), 14)) : todayISO();
-    // anything from any payroll that didn't go through and hasn't been paid again
-    const carry = from ? all.filter(x => x.p.run && x.p.failed && !x.p.redone) : [];
-    ui.runCarry = carry.map(x => x.t.id);
-    const lines = src.map(x => [x.p.payee, x.p.site, x.p.amount.toFixed(2)].join('\t')).concat(carry.map(x => [x.p.payee, x.p.site, x.p.amount.toFixed(2), (x.p.what || x.p.run) + ', ' + payDate(x.p.date) + ' payment did not go through'].join('\t'))).join('\n');
-    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="prTitle"><div class="sheet-head"><h2 id="prTitle">' + (from ? 'Next payroll' : 'Payroll') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
-      (from ? '<p>Same people and amounts as “' + esc(from) + '”' + (carry.length ? ', plus <b>' + carry.length + ' that didn’t go through</b> (at the bottom)' : '') + '. Change any amount, delete a line, or add a line for an expense or a missed payment: <i>Name, Project, Amount, what it’s for</i>, separated by Tab or commas.</p>'
-        : '<p>In your sheet, select the rows of your last payroll (from Date to notes), copy, and paste below. Or type one person per line: <i>Name, Project, Amount</i>, separated by Tab or commas.</p>') +
-      '<div class="pgrid"><div class="field"><label for="pr_name">Pay period</label><input class="ctl" id="pr_name" placeholder="Nov 8 to Nov 21" value="' + esc(name) + '" autocomplete="off"></div><div class="field"><label for="pr_date">Pay date</label><input class="ctl" type="date" id="pr_date" value="' + date + '"></div></div>' +
-      '<div class="field"><label for="pr_lines">People and amounts</label><textarea class="ctl" id="pr_lines" rows="12" placeholder="Jane Doe\tHead office\t1500.00">' + esc(lines) + '</textarea></div>' +
-      '<p class="hint" id="prSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payrunsave="1">Add to To pay</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="prMsg"></span></div></div></div>';
-    $('#sheet').hidden = false; runSum(); setTimeout(() => $(name ? '#pr_lines' : '#pr_name') && $(name ? '#pr_lines' : '#pr_name').focus(), 30);
-  }
-  function runSum() {
-    const el = $('#prSum'); if (!el) return;
-    const rows = parseRunLines($('#pr_lines').value), ok = rows.filter(r => !r.bad), bad = rows.filter(r => r.bad);
-    if (!$('#pr_name').value.trim() && ok.length && ok[0].sheet) { const pt = periodText(ok[0].what); if (pt) $('#pr_name').value = pt; }
-    el.innerHTML = ok.length ? ok.length + ' line' + (ok.length === 1 ? '' : 's') + ' · total AED ' + money(ok.reduce((s, r) => s + r.amount, 0)) + (bad.length ? ' · <b class="badtxt">' + bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' without an amount: ' + bad.map(b => esc(b.bad)).join(', ') + '</b>' : '') : '';
-  }
-  async function saveRunForm() {
-    const name = $('#pr_name').value.trim(), date = $('#pr_date').value || todayISO(), rows = parseRunLines($('#pr_lines').value);
-    if (!name) { $('#prMsg').textContent = 'Type the pay period, like Nov 8 to Nov 21.'; return; }
-    if (pays().some(x => x.p.run === name)) { $('#prMsg').textContent = 'There’s already a payroll with that name.'; return; }
-    if (!rows.length || rows.some(r => r.bad)) { $('#prMsg').textContent = rows.length ? 'Fix the lines without an amount first.' : 'Paste at least one person.'; return; }
-    if (!vault.key && !(await needVault())) return;
-    snapshot();
-    for (const r of rows) { const extra = !!(r.what && r.what !== name && !(r.sheet && periodText(r.what))); await addPayment({ date, payee: r.payee, site: r.site, what: extra || r.sheet ? r.what || name : name, amount: r.amount, run: name, extra }); }
-    (ui.runCarry || []).forEach(id => { const t = taskById(id), p = t && payOf(t); if (p && rows.some(r => r.payee === p.payee && Math.abs(r.amount - p.amount) < 0.01)) p.redone = true; }); ui.runCarry = null;
-    save(); closeSheet(); ui.payTab = 'runs'; ui.payOpen = name; render(); toast(rows.length + ' payments added', true);
-  }
-  // Import rows copied from the sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
+
+  /* ---- import rows from the cash-flow sheet ---- */
   // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows become To pay; the rest are already paid.
   function parseSheetRows(text) {
-    const out = []; let lastDate = null, lastVendor = '', ctx = null; out.skipped = 0;
+    const out = [], soon = D.toISO(D.addDays(new Date(), 7)); let lastDate = null, lastVendor = '', ctx = null; out.skipped = 0;
     String(text || '').split(/\r?\n/).forEach(line => {
       if (!line.trim()) return;
       const c = line.split('\t').map(x => x.trim());
       if (/^date$/i.test(c[0])) return; // header
       const dt = sheetDate(c[0]);
-      if (c[0]) { ctx = dt ? 'date' : /^(pending|due)\b/i.test(c[0]) ? 'pend' : 'skip'; if (dt) lastDate = dt; } // a month heading like "SEP" starts a forecast: skipped
+      if (c[0]) { ctx = dt ? (dt > soon ? 'skip' : 'date') : /^(pending|due)\b/i.test(c[0]) ? 'pend' : 'skip'; if (dt) lastDate = dt; } // a month heading like "SEP", or a date more than a week ahead, is a forecast: skipped
       const pending = ctx === 'pend';
       if (!ctx || ctx === 'skip') { if (isAmt(c[5]) || isAmt(c[6])) out.skipped++; return; }
       const vendor = c[1] || (!c[0] && lastVendor ? lastVendor : ''); if (c[1]) lastVendor = c[1]; else if (c[0]) lastVendor = '';
@@ -3046,10 +3336,10 @@
       const failed = dep > 0 && chk > 0 && Math.abs(dep - chk) < 0.01 && /not go through|didn.?t go through|did not go/i.test(note);
       const same = dep > 0 && chk > 0 && !failed && Math.abs(dep - chk) < 0.01, both = dep > 0 && chk > 0 && !failed && !same;
       const desc = c[4] || '', isRun = !!(c[3] && periodText(desc));
-      out.push({ date: (pending ? todayISO() : dt || lastDate || todayISO()), payee: vendor, check: c[2] || '', site: c[3] || '', what: desc, amount: both ? Math.abs(Math.round((chk - dep) * 100) / 100) : (chk > 0 ? chk : dep), twice: same, dir: (chk > 0 && !(both && dep > chk)) ? 'out' : 'in',
+      out.push({ date: (pending ? todayISO() : dt || lastDate || todayISO()), payee: vendor, check: c[2] || '', site: c[3] || '', what: desc, amount: both ? Math.abs(r2(chk - dep)) : (chk > 0 ? chk : dep), twice: same, dir: (chk > 0 && !(both && dep > chk)) ? 'out' : 'in',
         status: pending ? 'req' : 'paid', receipt: /need receipt/i.test(note) ? 'no' : 'yes', failed, note: note.replace(/need receipt/i, '').replace(/^[\s;,.-]+|[\s;,.-]+$/g, '') + (pending && c[0] ? (note ? '; ' : '') + c[0] : ''), run: isRun ? periodText(desc) : '' });
     });
-    // One payroll per pay date: rows paid that day for another period (a missed payment paid late) are added lines.
+    // One payroll per pay date: rows paid that day for an earlier period (a missed payment paid late) are added lines
     const byDate = {}; out.filter(r => r.run).forEach(r => { (byDate[r.date] = byDate[r.date] || {})[r.run] = ((byDate[r.date] || {})[r.run] || 0) + 1; });
     out.filter(r => r.run).forEach(r => { const m = Object.entries(byDate[r.date]).sort((a, b) => b[1] - a[1])[0][0]; if (r.run === m) return; const a = periodDates(r.run, r.date), z = periodDates(m, r.date); if (!(a && z && a.end.getTime() === z.end.getTime())) r.extra = true; r.run = m; });
     // a payroll's main pay date is the one with the most people; lines paid on other days (a top-up a week later) are added lines
@@ -3072,33 +3362,40 @@
     const el = $('#piSum'); if (!el) return;
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value), fresh = rows.filter(r => !have.has(payKey(r)));
     const runs = new Set(fresh.filter(r => r.run).map(r => r.run)).size, tp = fresh.filter(r => r.status === 'req').length, bad = fresh.filter(r => r.failed && !r.redone).length;
-    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (no date above them, or a forecast section)' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
+    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
   }
   async function saveImport() {
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value).filter(r => !have.has(payKey(r)));
     if (!rows.length) { $('#piMsg').textContent = 'Nothing new to import.'; return; }
-    if (!vault.key && !(await needVault())) return;
+    if (!(await needVault())) return;
     $('#piMsg').textContent = 'Importing…'; snapshot();
     for (const r of rows) await addPayment(r);
     save(); closeSheet(); ui.payTab = 'all'; render(); toast(rows.length + ' rows imported', true);
   }
+
   function bindPay() {
     if (!PAY_ON) return;
     const go = () => needVault().then(ok => { if (ok) render(); });
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-payrun],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
       if (d.paytab) { ui.payTab = d.paytab; ui.paySel = new Set(); renderMain(); return; }
       if (d.paynew) return openPayForm(null);
       if (d.payimport) return openImport();
-      if (d.payrun !== undefined) return openRunForm(d.payrun || null);
+      if (d.paybasket !== undefined) return openBasket(d.paybasket || d.kind);
+      if (d.payroster) return openRoster();
+      if (d.payrosterimport) return openRosterImport();
+      if (d.recedit) return openRecurring();
+      if (d.recfind) return openRecFind();
+      if (d.rosteropen) { ui.rosterOpen = ui.rosterOpen === d.rosteropen ? null : d.rosteropen; renderMain(); return; }
       if (d.payedit) return openPayForm(d.payedit);
       if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
       if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
+      if (d.runmore) { ui.runLimit = (ui.runLimit || 12) + 24; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
       const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { x.p.status = st; }); save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
       if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], { req: 'ok', ok: 'paid' }[p.status]); return; }
@@ -3107,20 +3404,45 @@
       if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
     });
     $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
+    $('#content').addEventListener('change', async e => {
+      if (e.target.id === 'fcMonths') { ui.fcMonths = +e.target.value; renderMain(); }
+      if (e.target.id === 'fcBal') { const v = e.target.value.trim(), n = toNum(v); if (!(await needVault())) return; await setPayCfg({ balance: v === '' ? null : n, balanceDate: todayISO() }); renderMain(); }
+    });
+    $('#content').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'fcBal') e.target.blur(); });
     $('#sheet').addEventListener('click', e => {
-      if (e.target.closest('[data-paysave]')) { savePayForm(); return; }
-      if (e.target.closest('[data-payrunsave]')) { saveRunForm(); return; }
-      if (e.target.closest('[data-payimportgo]')) { saveImport(); return; }
-      const del = e.target.closest('[data-paydel]');
+      const t = e.target;
+      if (t.closest('[data-paysave]')) return savePayForm();
+      if (t.closest('[data-payimportgo]')) return saveImport();
+      if (t.closest('[data-bsave]')) return basketSave();
+      if (t.closest('[data-badd]')) { const tb = $('#bkRows'); tb.insertAdjacentHTML('beforeend', basketRowHtml({ on: true, payee: '', site: '', amount: '', what: '', info: '' }, tb.children.length)); $('.b-payee', tb.lastElementChild).focus(); basketSum(); return; }
+      if (t.closest('[data-brm]')) { t.closest('tr').remove(); basketSum(); return; }
+      if (t.closest('[data-bpaste]')) { $('#bkPaste').hidden = !$('#bkPaste').hidden; if (!$('#bkPaste').hidden) $('#bk_paste').focus(); return; }
+      if (t.closest('[data-bpasteadd]')) { const txt = $('#bk_paste').value, rs = parseRunLines(txt), tb = $('#bkRows'); rs.forEach(r => tb.insertAdjacentHTML('beforeend', basketRowHtml(Object.assign({ on: true, info: '' }, r), tb.children.length))); if (!$('#bk_name').value) { const first = (txt.split(/\r?\n/).find(l => l.split('\t').length >= 7) || '').split('\t'); const pt = periodText(first[4] || ''); if (pt) $('#bk_name').value = pt; const d = sheetDate(first[0] || ''); if (d) $('#bk_date').value = d; } $('#bk_paste').value = ''; $('#bkPaste').hidden = true; basketSum(); toast(rs.length + ' lines added'); return; }
+      if (t.closest('[data-rosterimportgo]')) return rosterImportSave();
+      if (t.closest('[data-radd]')) { $('#roRows').insertAdjacentHTML('beforeend', rosterRowHtml({ freq: '2w' })); $('.r-name', $('#roRows').lastElementChild).focus(); return; }
+      if (t.closest('[data-rrm]')) { t.closest('tr').remove(); rosterSum(); return; }
+      if (t.closest('[data-rsave]')) return rosterSave();
+      if (t.closest('[data-cadd]')) { $('#reRows').insertAdjacentHTML('beforeend', recRowHtml({})); $('.c-name', $('#reRows').lastElementChild).focus(); return; }
+      if (t.closest('[data-crm]')) { t.closest('tr').remove(); return; }
+      if (t.closest('[data-csave]')) return recSave();
+      if (t.closest('[data-rfgo]')) { const pick = [...document.querySelectorAll('[data-rf]')].filter(x => x.checked).map(x => ui.recFound[+x.dataset.rf]); openRecurring(pick); return; }
+      const del = t.closest('[data-paydel]');
       if (del) {
         if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Click again to delete'; return; }
-        const t = taskById(del.dataset.paydel); if (t) { snapshot(); trashTask(t); save(); } closeSheet(); render(); toast('Payment moved to Recently deleted', true);
+        const x = taskById(del.dataset.paydel); if (x) { snapshot(); trashTask(x); save(); } closeSheet(); render(); toast('Payment moved to Recently deleted', true);
       }
     });
-    $('#sheet').addEventListener('input', e => { if (e.target.id === 'pr_lines') runSum(); if (e.target.id === 'pi_rows') importSum(); });
+    $('#sheet').addEventListener('input', e => {
+      if (e.target.closest('#bkRows')) basketSum();
+      if (e.target.closest('#roRows') || e.target.id === 'ro_rate') rosterSum();
+      if (e.target.id === 'pi_rows') importSum();
+      if (e.target.id === 'ri_rows') rosterImportSum();
+    });
+    $('#sheet').addEventListener('change', e => { if (e.target.closest('#bkRows')) basketSum(); if (e.target.closest('#roRows')) rosterSum(); });
+    $('#sheet').addEventListener('focusout', e => { if (e.target.matches('.b-amt, .r-usd, .r-housing, .c-amt')) { const n = toNum(e.target.value); if (isFinite(n) && !/aed|\/|mo/i.test(e.target.value)) e.target.value = money(n); } });
     $('#sheet').addEventListener('keydown', e => {
       if (e.key === 'Enter' && e.target.matches('.pform input')) { e.preventDefault(); savePayForm(); }
-      if (e.key === 'Tab' && !e.shiftKey && e.target.id === 'pr_lines') { e.preventDefault(); e.target.setRangeText('\t', e.target.selectionStart, e.target.selectionEnd, 'end'); runSum(); } // Tab separates columns in the payroll box
+      if (e.key === 'Enter' && e.target.matches('#bkRows input')) { e.preventDefault(); const tr = e.target.closest('tr'), nx = tr.nextElementSibling, cls = [...e.target.classList].find(c => c.startsWith('b-')); if (nx && cls) $('.' + cls, nx).focus(); } // Enter moves down a column, like Excel
     });
   }
 
