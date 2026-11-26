@@ -423,7 +423,7 @@
   }
   const noteFor = iso => S.tasks.find(t => isNote(t) && t.due === iso);
   const plainLinks = s => (s || '').replace(/\[\[([^\[\]\n]*)\]\]/g, '$1');
-  const noteLines = t => (t.notes || t.title || '').split('\n').filter(x => !/^\t/.test(x) && !/^\[( |x|X)\]/.test(x)).map(x => x.replace(/\[\[([^\]]*)\]\]/g, '$1').trim()).filter(Boolean);
+  const noteLines = t => { const evk = new Set(S.tasks.filter(e => e.jFrom === t.id && e.type === 'event').map(e => e.jKey)); return (t.notes || t.title || '').split('\n').filter(x => !/^\t/.test(x) && !/^\[( |x|X)\]/.test(x) && !evk.has(x.trim().replace(/\s+/g, ' ').toLowerCase())).map(x => x.replace(/\[\[([^\]]*)\]\]/g, '$1').trim()).filter(Boolean); };
   function setDayNote(iso, text) {
     let n = noteFor(iso);
     if (!text.trim()) { if (n) S.tasks = S.tasks.filter(x => x !== n); }
@@ -1263,7 +1263,7 @@
     const d = D.fromISO(iso);
     return '<div class="d-scroll">' +
       '<div class="d-title"><span class="evicon big" style="color:' + tc('note') + '">' + I.note + '</span><div class="daytitle">' + D.WD_LONG[d.getDay()] + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + '</div><button type="button" class="iconbtn" data-dact="close" aria-label="Close">' + I.x + '</button></div>' +
-      '<div class="field"><span class="field-label">Journal</span>' + jEntry(iso, true) + '<span class="hint">Saved as you type. Just for you: the journal isn\u2019t sent to Outlook.</span></div>' +
+      '<div class="field"><span class="field-label">Journal</span>' + jEntry(iso, true) + '<span class="hint">Saved as you type. A line that starts with a time (1pm Lunch) or says \u201cevery week\u201d also goes on the calendar.</span></div>' +
       '<button type="button" class="toggle-row" data-dayadd="1">' + I.star + 'Add an event on this day</button>' +
       ((di.singles.length || di.spans.length) ? '<div class="field"><span class="field-label">Events</span><div class="tasks">' + di.spans.map(sp => eventRow(sp.t, { occ: sp.s })).join('') + di.singles.map(t => eventRow(t, { occ: iso })).join('') + '</div></div>' : '') +
       (tasks.length ? '<div class="field"><span class="field-label">Tasks due' + (iso < T ? '' : '') + '</span><div class="tasks">' + tasks.map(t => taskRow(t)).join('') + '</div></div>' : '') +
@@ -3865,11 +3865,11 @@
     o = o || {};
     const dot = o.hasKids ? '<button type="button" class="ol-dot fold' + (o.folded ? ' folded' : '') + '" data-olfold="' + i + '" title="' + (o.folded ? 'Show details' : 'Hide details') + '" aria-label="' + (o.folded ? 'Show details' : 'Hide details') + '"></button>' : '<span class="ol-dot"></span>';
     const box = l.task ? '<button type="button" class="check small jt' + (l.done ? ' on' : '') + '" data-jtick="' + i + '" aria-label="' + (l.done ? 'Mark not done' : 'Done') + '">' + I.check + '</button>' : '';
-    return '<div class="ol-line' + (o.hidden ? ' hid' : '') + (l.task ? ' istask' + (l.done ? ' isdone' : '') : '') + '" data-lvl="' + l.lvl + '"' + (l.task ? ' data-task="1"' + (l.done ? ' data-done="1"' : '') : '') + ' style="--lvl:' + l.lvl + '">' + dot + box + '<input class="ol-in" data-oli="' + i + '" value="' + esc(l.text) + '"' + (ph ? ' placeholder="' + ph + '"' : '') + ' autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" spellcheck="true" aria-label="Journal line">' + (o.chip || '') + '</div>';
+    return '<div class="ol-line' + (o.hidden ? ' hid' : '') + (l.task ? ' istask' + (l.done ? ' isdone' : '') : '') + '" data-lvl="' + l.lvl + '"' + (l.task ? ' data-task="1"' + (l.done ? ' data-done="1"' : '') : '') + ' style="--lvl:' + l.lvl + '">' + dot + box + '<textarea class="ol-in" rows="1" data-oli="' + i + '"' + (ph ? ' placeholder="' + ph + '"' : '') + ' autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" spellcheck="true" aria-label="Journal line">' + esc(l.text) + '</textarea>' + (o.chip || '') + '</div>';
   }
   function linesHtml(n, lines, ph) {
     const hid = hiddenSet(lines, n && n.folds), f = new Set((n && n.folds) || []);
-    return lines.map((l, i) => lineHtml(l, i, i === 0 && lines.length === 1 && !l.text ? ph : '', { hasKids: kids(lines, i), folded: f.has(foldKey(l)) && kids(lines, i), hidden: hid.has(i), chip: l.task ? taskChip(linkedTask(n, l)) : '' })).join('');
+    return lines.map((l, i) => lineHtml(l, i, i === 0 && lines.length === 1 && !l.text ? ph : '', { hasKids: kids(lines, i), folded: f.has(foldKey(l)) && kids(lines, i), hidden: hid.has(i), chip: l.task ? taskChip(linkedTask(n, l)) : evLineChip(linkedEvent(n, l), n) })).join('');
   }
   function olEditor(id, iso, lines, ph, page) { const n = taskById(id); return '<div class="ol" data-olid="' + id + '" data-oliso="' + iso + '"' + (page ? ' data-olpage="' + esc(page) + '"' : '') + '>' + linesHtml(n, lines, ph) + '</div>'; }
   function olView(n) {
@@ -3878,7 +3878,7 @@
       if (!l.text.trim() || hid.has(i)) return '';
       const k = kids(ls, i), t = linkedTask(n, l), done = t ? !!t.done : l.done;
       return '<div class="ol-line' + (l.task ? ' istask' + (done ? ' isdone' : '') : '') + '" style="--lvl:' + l.lvl + '">' + (k ? '<button type="button" class="ol-dot fold' + (f.has(foldKey(l)) ? ' folded' : '') + '" data-olfold="' + i + '" aria-label="Show or hide details"></button>' : '<span class="ol-dot"></span>') +
-        (l.task ? '<button type="button" class="check small jt' + (done ? ' on' : '') + '" data-jtick="' + i + '" aria-label="' + (done ? 'Mark not done' : 'Done') + '">' + I.check + '</button>' : '') + '<span class="ol-txt">' + linkify(l.text) + '</span>' + (l.task ? taskChip(t) : '') + '</div>';
+        (l.task ? '<button type="button" class="check small jt' + (done ? ' on' : '') + '" data-jtick="' + i + '" aria-label="' + (done ? 'Mark not done' : 'Done') + '">' + I.check + '</button>' : '') + '<span class="ol-txt">' + linkify(l.text) + '</span>' + (l.task ? taskChip(t) : evLineChip(linkedEvent(n, l), n)) + '</div>';
     }).join('') + '</div>';
   }
   const tools = (iso, opts) => '<div class="ol-tools">' + (isPhone() ? '<button type="button" class="chipbtn" data-olind="-1" aria-label="Move left a level">' + I.left + '</button><button type="button" class="chipbtn" data-olind="1" aria-label="Move right a level">' + I.right + '</button>' : '') + '<button type="button" class="chipbtn" data-oltask="1" title="Make this line a task (or type [ ] first)">' + I.check + 'Task</button><button type="button" class="chipbtn" data-ollink="1" title="Link a person or thing">' + I.link + 'Link</button>' +
@@ -3988,10 +3988,52 @@
   const pageRow = p => '<div class="task knote"><span class="evicon">' + I.journal + '</span><div class="tbody" data-jlink="' + esc(p.title) + '" role="button" tabindex="0"><div class="ttitle">' + esc(p.title) + '</div><div class="tmeta"><span>Page</span></div></div></div>';
 
   // ---- tasks written in the journal ([ ] lines) ↔ real tasks
+  // A journal line's date: what it says, or else the journal day it's written on (for a time or a repeat with no date)
+  function parseOnDay(n, text, lists) {
+    const opts = { noRange: true };
+    let p = D.parseQuick(text, lists || [], new Date(), opts);
+    if (!p.dateTyped && n && isNote(n) && n.due && (p.time || p.recur || p.reminder)) {
+      const p2 = D.parseQuick(text + ' ' + n.due, lists || [], new Date(), opts);
+      if (p2.due === n.due) p = Object.assign(p2, { title: p.title });
+    }
+    if (p.due && p.recur && p.recur.byDay && p.recur.byDay.length && !p.recur.byDay.includes(D.fromISO(p.due).getDay())) p.due = D.nextOccurrence(p.due, p.recur); // "every mon" written on a Thursday starts Monday
+    return p;
+  }
+  // A top-level journal line that starts with a time ("1pm Show") or says "every …" is put on the calendar as an event
+  const START_TIME = /^\s*(?:at\s+)?(?:noon|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})\b/i;
+  function isEvLine(n, l) {
+    if (!n || !isNote(n) || isMeet(n) || !n.due || l.task || l.lvl !== 0 || !l.text.trim()) return false;
+    const txt = plainLinks(l.text);
+    if (START_TIME.test(txt)) return !!parseOnDay(n, l.text).time;
+    return /\bevery\b/i.test(txt) && !!parseOnDay(n, l.text).recur;
+  }
+  const linkedEvent = (n, l) => n ? S.tasks.find(t => t.jFrom === n.id && isEvent(t) && t.jKey === tKey(l.text)) : null;
+  function evLineChip(t, n) {
+    if (!t) return '';
+    return '<span class="jtchip jevchip" title="On your calendar">' + I.clock + (n && t.due !== n.due ? esc(D.dueLabel(t.due)) + ' ' : '') + (t.time ? D.fmtTime(t.time) : '') + (t.recur ? ' ' + I.repeat + esc(D.recurText(t.recur).toLowerCase()) : '') + '</span>';
+  }
+  function commitEvents(n) {
+    if (!n || !isNote(n)) return false;
+    const ls = parseOutline(n.notes).filter(l => isEvLine(n, l));
+    const linked = S.tasks.filter(t => t.jFrom === n.id && isEvent(t)), used = new Set(), pend = []; let ch = false;
+    ls.forEach(l => { const t = linked.find(x => !used.has(x) && x.jKey === tKey(l.text)); if (t) used.add(t); else pend.push(l); });
+    const free = linked.filter(t => !used.has(t));
+    pend.forEach(l => {
+      if (S.trash.tasks.some(x => x.jFrom === n.id && x.jKey === tKey(l.text))) return; // deleted on purpose
+      const t = free.shift() || newTask({ jFrom: n.id }); // an edited line updates its event
+      if (!S.tasks.includes(t)) S.tasks.push(t);
+      const p = parseOnDay(n, l.text);
+      Object.assign(t, { type: 'event', listId: 'inbox', title: unbr(p.title || l.text).trim(), jKey: tKey(l.text), due: p.due || n.due, time: p.time || null, recur: p.recur || null, reminder: p.reminder || null, remindedFor: null });
+      used.add(t); ch = true;
+    });
+    free.forEach(t => { S.tasks = S.tasks.filter(x => x !== t); ch = true; }); // its line is gone, or no longer has a time
+    return ch;
+  }
   function commitTasks(n) {
     if (!n || (!isNote(n) && !isPage(n))) return false;
+    const evCh = commitEvents(n);
     const ls = parseOutline(n.notes).filter(l => l.task && l.text.trim());
-    const linked = S.tasks.filter(t => t.jFrom === n.id), used = new Set(); let ch = false, rewrite = false;
+    const linked = S.tasks.filter(t => t.jFrom === n.id && !t.type), used = new Set(); let ch = evCh, rewrite = false;
     const pend = [];
     ls.forEach(l => { const t = linked.find(x => !used.has(x) && x.jKey === tKey(l.text)); if (t) { used.add(t); pair(l, t); } else pend.push(l); });
     const free = linked.filter(t => !used.has(t) && !t.done);
@@ -4002,7 +4044,7 @@
       const nt = newTask({ jFrom: n.id }); fill(nt, l); ch = true; pair(l, nt);
     });
     free.forEach(t => { S.tasks = S.tasks.filter(x => x !== t); ch = true; }); // its line is gone
-    function fill(t, l) { const wt = parseWaiting(l.text); const p = D.parseQuick(wt ? wt.rest : l.text, S.lists, new Date(), { noRange: true }); if (wt && !(t.waiting && t.waiting.who.toLowerCase() === wt.who.toLowerCase())) t._wt = wt; Object.assign(t, { title: (p.title || l.text.trim()).replace(/\[\[([^\[\]]*)\]\]/g, '$1'), jKey: tKey(l.text), due: p.due || null, time: p.end ? null : (p.time || null), recur: p.recur || null, reminder: p.reminder || null, listId: p.listId || t.listId || 'inbox' }); if (t._wt) { setWaiting(t, t._wt.who, 3); delete t._wt; } ch = true; }
+    function fill(t, l) { const wt = parseWaiting(l.text); const p = parseOnDay(n, wt ? wt.rest : l.text, S.lists); if (wt && !(t.waiting && t.waiting.who.toLowerCase() === wt.who.toLowerCase())) t._wt = wt; Object.assign(t, { title: (p.title || l.text.trim()).replace(/\[\[([^\[\]]*)\]\]/g, '$1'), jKey: tKey(l.text), due: p.due || null, time: p.end ? null : (p.time || null), recur: p.recur || null, reminder: p.reminder || null, listId: p.listId || t.listId || 'inbox' }); if (t._wt) { setWaiting(t, t._wt.who, 3); delete t._wt; } ch = true; }
     function pair(l, t) {
       if (l.done && !t.done) { finishTask(t); ch = true; if (!t.done) { l.done = false; rewrite = true; } } // repeating: moves to the next date
       else if (!l.done && t.done) { t.done = false; t.doneAt = null; ch = true; }
@@ -4267,6 +4309,8 @@
         return;
       }
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const wrapped = inp.scrollHeight > inp.clientHeight + 2 || inp.scrollHeight > 40;
+        if (wrapped && (e.key === 'ArrowUp' ? pos > 0 : end < inp.value.length)) return; // long line shown on several rows: move inside it first
         const all = [...document.querySelectorAll('.jentry.editing .ol-line:not(.hid) .ol-in')], j = all.indexOf(inp) + (e.key === 'ArrowUp' ? -1 : 1);
         if (all[j]) { e.preventDefault(); all[j].focus(); const c = Math.min(pos, all[j].value.length); all[j].setSelectionRange(c, c); }
       }
@@ -4278,6 +4322,7 @@
         const hd = e.target.closest('.jmeet'), nm = mName(n); let all = hd.querySelector('.jmeet-all');
         if (!nm) { if (all) all.remove(); } else { if (!all) { all = document.createElement('button'); all.type = 'button'; all.className = 'jlink jmeet-all'; all.textContent = 'All'; hd.appendChild(all); } all.dataset.jlink = nm; all.title = 'Every ' + nm + ' meeting'; } if (ui.view === 'calendar' && e.target.closest('#detail')) renderMain(); } return; }
       const inp = e.target.closest && e.target.closest('.ol-in'); if (!inp) return;
+      if (/\n/.test(inp.value)) { const c = inp.selectionStart; inp.value = inp.value.replace(/\r?\n/g, ' '); inp.setSelectionRange(c, c); }
       const ol = inp.closest('.ol'), line = inp.closest('.ol-line');
       // typing "[ ]" or "[]" at the start makes it a task line
       const m = !line.dataset.task && inp.value.match(/^\[ ?\]\s/);
@@ -4291,7 +4336,7 @@
     document.addEventListener('focusin', e => { const inp = e.target.closest && e.target.closest('.ol-in'); if (inp) { const ol = inp.closest('.ol'); ui.olFocus = { id: ol.dataset.olid, iso: ol.dataset.oliso, i: Number(inp.dataset.oli) }; } });
     document.addEventListener('focusout', e => {
       const inp = e.target.closest && e.target.closest('.ol-in');
-      if (inp && inp.closest('.ol-line').dataset.task) { const n = taskById(inp.closest('.ol').dataset.olid); if (n && commitTasks(n)) { const ol = inp.closest('.ol'); setTimeout(() => { if (!ol.isConnected) return; ol.querySelectorAll('.ol-line.istask').forEach(div => { const i = Number(div.querySelector('.ol-in').dataset.oli); const l = olRead(ol)[i]; const c = div.querySelector('.jtchip'); const html = taskChip(linkedTask(n, l)); if (c) c.outerHTML = html || ''; else if (html) div.insertAdjacentHTML('beforeend', html); }); renderSide(); if (ui.view === 'calendar') renderMain(); }, 0); } }
+      if (inp) { const n = taskById(inp.closest('.ol').dataset.olid); if (n && commitTasks(n)) { save(); const ol = inp.closest('.ol'); setTimeout(() => { if (!ol.isConnected) return; const ls = olRead(ol); ol.querySelectorAll('.ol-line').forEach(div => { const i = Number(div.querySelector('.ol-in').dataset.oli), l = ls[i]; if (!l) return; const c = div.querySelector('.jtchip'); const html = l.task ? taskChip(linkedTask(n, l)) : evLineChip(linkedEvent(n, l), n); if (c) c.outerHTML = html || ''; else if (html) div.insertAdjacentHTML('beforeend', html); }); renderSide(); if (ui.view === 'calendar') renderMain(); }, 0); } }
       if (e.target.matches && e.target.matches('.jmeet-in')) { const n = taskById(e.target.dataset.jmeetname); if (n) { n.meet = n.meet.trim(); splitMeetTime(n, e.target); if (!n.meet && !n.notes && !(n.attachments || []).length) setTimeout(() => { if (document.activeElement && document.activeElement.closest && document.activeElement.closest('.jitem[data-jid="' + n.id + '"]')) return; S.tasks = S.tasks.filter(x => x !== n); save(); render(); }, 150); else { save(); if (ui.view === 'journal') setTimeout(renderMain, 150); } } }
       if (e.target.matches && e.target.matches(SUG_FIELDS)) setTimeout(() => { if (!document.activeElement || !document.activeElement.matches(SUG_FIELDS)) hideSuggest(); }, 150);
     });
@@ -4649,6 +4694,8 @@
       if (isPaper(t) && t.expires && expTask(t) && expTask(t).lead === undefined) { placeExpTask(t); ch++; }
       if (isPaper(t) && t.expires && expTask(t) && expTask(t).title !== docName(t) + ' expires') { placeExpTask(t); ch++; } // names follow the current naming rules
     });
+    if (ch) { save(); render(); }
+    S.tasks.filter(t => isNote(t) && t.due >= todayISO() && !isMeet(t)).forEach(n => { if (commitEvents(n)) ch++; }); // today's and upcoming journal lines with a time go on the calendar
     if (ch) { save(); render(); }
     autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000);
   if (/[?&]share=1/.test(location.search)) { history.replaceState(null, '', location.pathname); takeShared(); }
