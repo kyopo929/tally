@@ -3663,7 +3663,7 @@
       const same = dep > 0 && chk > 0 && !failed && Math.abs(dep - chk) < 0.01, both = dep > 0 && chk > 0 && !failed && !same;
       const desc = c[4] || '', isRun = !!(c[3] && periodText(desc));
       out.push({ date: (pending ? '' : dt || lastDate || todayISO()), /* a Pending or Due row has no date until it's paid */ payee: vendor, check: c[2] || '', site: c[3] || '', what: desc, amount: both ? Math.abs(r2(chk - dep)) : (chk > 0 ? chk : dep), twice: same, dir: (chk > 0 && !(both && dep > chk)) ? 'out' : 'in',
-        status: pending ? 'req' : 'paid', receipt: /need receipt/i.test(note) ? 'no' : 'yes', failed, note: note.replace(/need receipt/i, '').replace(/^[\s;,.-]+|[\s;,.-]+$/g, '') + (pending && c[0] ? (note ? '; ' : '') + c[0] : ''), run: isRun ? periodText(desc) : '' });
+        status: pending ? 'req' : (dt || lastDate || '') > todayISO() ? 'sched' : 'paid', /* dated after today: set up with the bank, not paid yet */ receipt: /need receipt/i.test(note) ? 'no' : 'yes', failed, note: note.replace(/need receipt/i, '').replace(/^[\s;,.-]+|[\s;,.-]+$/g, '') + (pending && c[0] ? (note ? '; ' : '') + c[0] : ''), run: isRun ? periodText(desc) : '' });
     });
     // One payroll per pay date: rows paid that day for an earlier period (a missed payment paid late) are added lines
     const byDate = {}; out.filter(r => r.run).forEach(r => { (byDate[r.date] = byDate[r.date] || {})[r.run] = ((byDate[r.date] || {})[r.run] || 0) + 1; });
@@ -3675,23 +3675,33 @@
     out.forEach(r => { if (r.failed && out.some(o => o !== r && !o.failed && o.payee === r.payee && Math.abs(o.amount - r.amount) < 0.01 && o.date >= r.date)) r.redone = true; });
     return out;
   }
-  const payKey = p => [p.date, p.payee, p.what, money(p.amount), p.dir].join('|').toLowerCase();
+  // Rows already in Tally are skipped. A row matches one payment in Tally with the same date (or both pending), column and amount,
+  // and the same vendor or description (a blank vendor matches any). Each payment in Tally matches once, so two equal rows on one day both count.
+  function importFresh(rows) {
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''), pool = pays().map(x => x.p);
+    return rows.filter(r => {
+      const i = pool.findIndex(p => p.dir === r.dir && Math.abs((Number(p.amount) || 0) - (Number(r.amount) || 0)) < 0.005 &&
+        (r.date ? p.date === r.date : !isPaid(p) && !isSched(p)) &&
+        (!r.payee || !p.payee || norm(p.payee) === norm(r.payee) || norm(p.what) === norm(r.what)));
+      if (i < 0) return true; pool.splice(i, 1); return false;
+    });
+  }
   function openImport() {
     $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="piTitle"><div class="sheet-head"><h2 id="piTitle">Import from your sheet</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
       '<ol class="howto"><li>In Excel, select rows from the <b>Date</b> column across to the <b>notes</b> column (A to I).</li><li>Press <b>Ctrl+C</b>.</li><li>Click the box below and press <b>Ctrl+V</b>.</li></ol>' +
-      '<p class="hint">Rows marked Pending or Due come in as Pending. Everything else comes in as already paid. Rows already in Tally are skipped, so pasting the same rows twice is safe. The data is scrambled on this device before it syncs.</p>' +
+      '<p class="hint">Rows marked Pending or Due come in as Pending. Rows dated after today come in as Scheduled; everything else comes in as already paid. Rows already in Tally are skipped, so pasting the same rows twice is safe. The data is scrambled on this device before it syncs.</p>' +
       '<div class="field"><label for="pi_rows">Rows from the sheet</label><textarea class="ctl" id="pi_rows" rows="10"></textarea></div>' +
       '<p class="hint" id="piSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payimportgo="1">Import</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="piMsg"></span></div></div></div>';
     $('#sheet').hidden = false; setTimeout(() => $('#pi_rows') && $('#pi_rows').focus(), 30);
   }
   function importSum() {
     const el = $('#piSum'); if (!el) return;
-    const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value), fresh = rows.filter(r => !have.has(payKey(r)));
+    const rows = parseSheetRows($('#pi_rows').value), fresh = importFresh(rows);
     const runs = new Set(fresh.filter(r => r.run).map(r => r.run)).size, tp = fresh.filter(r => r.status === 'req').length, bad = fresh.filter(r => r.failed && !r.redone).length;
     el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' pending' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + (rows.rounding ? ' · ' + rows.rounding + ' rounding rows left out' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
   }
   async function saveImport() {
-    const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value).filter(r => !have.has(payKey(r)));
+    const rows = importFresh(parseSheetRows($('#pi_rows').value));
     if (!rows.length) { $('#piMsg').textContent = 'Nothing new to import.'; return; }
     if (!(await needVault())) return;
     $('#piMsg').textContent = 'Importing…'; snapshot();
