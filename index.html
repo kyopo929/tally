@@ -1301,6 +1301,13 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 @media (max-width: 900px) { .pstick { margin: -6px -16px 6px; padding: 8px 16px 2px; } }
 @media (max-width: 600px) { .pstick { margin: -4px -12px 6px; padding: 6px 12px 2px; } .prow.pdrag { grid-template-columns: 12px 20px 1fr auto; } }
 
+.prunlines { margin: -6px auto 14px; border-top-left-radius: 0; border-top-right-radius: 0; }
+.ptable tr[data-rdrag] { cursor: grab; }
+.ptable tr.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+.ptable tr.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
+.ptable tr.dragging { opacity: .4; }
+.psec .hint { margin-left: 4px; }
+
 </style>
 </head>
 <body>
@@ -4579,7 +4586,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
     const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
-    return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + (opts && opts.drag ? ' pdrag" draggable="true" data-pdrag="' + x.t.id + '" title="Drag to change the order' : '') + '">' + (opts && opts.drag ? '<span class="pgrip" aria-hidden="true">⋮⋮</span>' : '') +
+    return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + (opts && opts.drag ? ' pdrag" draggable="true" data-pdrag="' + x.t.id + '" title="Drag to change the order' : opts && opts.rdrag ? ' pdrag" draggable="true" data-rdrag="' + esc(p.payee) + '" title="Drag to change the payroll order (saved in the roster)' : '') + '">' + (opts && (opts.drag || opts.rdrag) ? '<span class="pgrip" aria-hidden="true">⋮⋮</span>' : '') +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
       '<span class="pdate' + (isPaid(p) ? '' : isSched(p) ? ' sched' : ' pend') + '">' + (isPaid(p) || isSched(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
       '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || (p.dir === 'in' ? 'Head office' : p.what) || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
@@ -4588,10 +4595,26 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       '<button type="button" class="pst st-' + (isPaid(p) ? 'paid' : isSched(p) ? 'sched' : 'req') + '" data-paynext="' + x.t.id + '" title="Click to mark ' + (isPaid(p) ? 'Pending' : 'Paid now') + '">' + (isPaid(p) ? 'Paid' : isSched(p) ? 'Scheduled' : 'Pending') + '</button></div>';
   }
   // Order for lists and Excel: by date; on each date a person's lines stay together, regular pay first, then adjustments
+  // The roster in its display order: A–Z by default, or the order you dragged; 2-week staff, then month-end
+  function rosterList(cfg) {
+    cfg = cfg || payCfg(); const rs = cfg.roster.slice();
+    if (cfg.rosterSort !== 'custom') rs.sort((a, b) => payName(a).localeCompare(payName(b), undefined, { sensitivity: 'base' }));
+    return rs.filter(r => r.freq !== 'mo').concat(rs.filter(r => r.freq === 'mo'));
+  }
+  function rosterRank() { const m = new Map(); rosterList().forEach((r, i) => { m.set(normName(payName(r)), i); if (r.name) m.set(normName(r.name), i); }); return m; }
+  // Put people in a new order (names as written in payroll); others keep their places
+  async function rosterReorder(names) {
+    const L = rosterList(), want = names.map(normName), idx = L.map((r, i) => want.includes(normName(payName(r))) ? i : -1).filter(i => i >= 0);
+    const moved = want.map(n => L.find(r => normName(payName(r)) === n)).filter(Boolean);
+    if (moved.length !== idx.length) return;
+    idx.forEach((i, k) => { L[i] = moved[k]; });
+    snapshot(); await setPayCfg({ roster: L, rosterSort: 'custom' }); renderMain(); toast('Payroll order saved', true);
+  }
   function payOrder(xs) {
     const pos = new Map(S.tasks.map((t, i) => [t.id, i])), at = x => pos.get(x.t.id) ?? 0, key = x => (x.p.date || '') + '|' + normName(x.p.payee); // the order they were added
     const first = {}; xs.forEach(x => { const k = key(x), c = at(x) + (x.p.extra ? 1e9 : 0); if (!(k in first) || c < first[k]) first[k] = c; });
-    return xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || first[key(a)] - first[key(b)] || (a.p.extra ? 1 : 0) - (b.p.extra ? 1 : 0) || at(a) - at(b));
+    const rank = rosterRank(), R = x => x.p.run ? (rank.has(normName(x.p.payee)) ? rank.get(normName(x.p.payee)) : 1e5) : 2e5;
+    return xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || R(a) - R(b) || (R(a) === 1e5 ? (a.p.payee || '').localeCompare(b.p.payee || '') : 0) || (R(a) === 2e5 ? first[key(a)] - first[key(b)] : 0) || (a.p.extra ? 1 : 0) - (b.p.extra ? 1 : 0) || at(a) - at(b));
   }
   // The filter box: a date (2026, 2026-11, 2026-11-01) filters by date; anything else searches the text
   function payFind(xs) {
@@ -4648,7 +4671,8 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
-        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
+        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>' +
+          '<div class="plist prunlines">' + payOrder(rs).map(x => payRow(x, { why: true, rdrag: true })).join('') + '</div>'; });
         xs = loose.slice().sort((a, b) => (a.p.order ?? 1e9) - (b.p.order ?? 1e9) || (b.p.date || '').localeCompare(a.p.date || '')); // your dragged order; new ones after, newest first
       }
       ui.payShown = xs.map(x => x.t.id);
@@ -4718,16 +4742,16 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     if (nx && !runs.some(r => r.name === nx.name)) h += '<div class="pnext"><div><b>Next payroll: ' + esc(nx.name) + '</b><span class="psub">Pay date about ' + esc(payDate(nx.date)) + (cfg.roster.length ? ' · AED ' + money(T.twoPay) + ' from the roster' : ' · same people and amounts as ' + esc(nx.from)) + ', plus anything that didn’t go through</span></div><button type="button" class="chipbtn solid" data-paybasket="" data-kind="next">Set up basket</button></div>';
     if (T.mo.length && !runs.some(r => r.name === me)) h += '<div class="pnext"><div><b>Month-end: ' + esc(monthName(today)) + '</b><span class="psub">' + T.mo.map(r => esc(payName(r))).join(', ') + ' · AED ' + money(T.moPay) + ' on ' + esc(payDate(D.toISO(lastOfMonth(today)))) + '</span></div><button type="button" class="chipbtn solid" data-paybasket="" data-kind="month">Set up basket</button></div>';
     // roster
-    h += '<div class="psec"><h3>Roster <span class="n">' + cfg.roster.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-payrosterimport="1">Import roster</button><button type="button" class="chipbtn" data-payroster="1">Edit roster</button></div>';
+    h += '<div class="psec"><h3>Roster <span class="n">' + cfg.roster.length + '</span></h3><span class="hint">' + (cfg.rosterSort === 'custom' ? 'Your order' : 'A–Z') + ' · drag to reorder</span><span class="spacer"></span>' + (cfg.rosterSort === 'custom' ? '<button type="button" class="chipbtn" data-rosteraz="1">Sort A–Z</button>' : '') + '<button type="button" class="chipbtn" data-payrosterimport="1">Import roster</button><button type="button" class="chipbtn" data-payroster="1">Edit roster</button></div>';
     if (!cfg.roster.length) h += '<p class="hint pcenter">Copy your payroll list from Excel (Name to Housing Allowance) and click “Import roster”. Then Tally works out every payroll, month and year, and forecasts the next ones.</p>';
     else {
       const last = runs.find(r => r.two), lastPaid = {}; (last ? last.xs : []).forEach(x => { lastPaid[x.p.payee] = (lastPaid[x.p.payee] || 0) + x.p.amount; });
-      const rows = cfg.roster.slice().sort((a, b) => (a.freq === 'mo') - (b.freq === 'mo') || payName(a).localeCompare(payName(b)));
+      const rows = rosterList(cfg);
       h += '<div class="pscroll"><table class="ptable"><thead><tr><th>Name</th><th>Project</th><th>Sponsor</th><th>Start</th><th class="r">Yearly $</th><th class="r">Each pay AED</th><th class="r">Monthly AED</th><th class="r">Yearly AED</th><th>Last paid</th></tr></thead><tbody>' +
         rows.map(r => {
           const pp = perPay(r, rate), lp = lastPaid[payName(r)], off = r.freq !== 'mo' && lp !== undefined && Math.abs(lp - pp) > 1, open = ui.rosterOpen === r.id;
           const hist = open ? all.filter(x => x.p.payee === payName(r)).slice(0, 12) : [];
-          return '<tr class="' + (r.active === false ? 'off' : '') + (open ? ' open' : '') + '" data-rosteropen="' + r.id + '"><td><b>' + esc(r.name) + '</b>' + (r.alias && r.alias !== r.name ? '<span class="psub">as ' + esc(r.alias) + '</span>' : '') + (r.freq === 'mo' ? '<span class="ptag">month-end</span>' : '') + '</td><td>' + esc(r.site || '') + '</td><td>' + esc(r.sponsor || '') + '</td><td>' + esc(r.start ? (sheetDate(r.start) ? payDate(sheetDate(r.start)) : r.start) : '') + '</td>' +
+          return '<tr class="' + (r.active === false ? 'off' : '') + (open ? ' open' : '') + '" data-rosteropen="' + r.id + '" draggable="true" data-rdrag="' + esc(payName(r)) + '" title="Click to see payments · drag to change the payroll order"><td><b>' + esc(r.name) + '</b>' + (r.alias && r.alias !== r.name ? '<span class="psub">as ' + esc(r.alias) + '</span>' : '') + (r.freq === 'mo' ? '<span class="ptag">month-end</span>' : '') + '</td><td>' + esc(r.site || '') + '</td><td>' + esc(r.sponsor || '') + '</td><td>' + esc(r.start ? (sheetDate(r.start) ? payDate(sheetDate(r.start)) : r.start) : '') + '</td>' +
             '<td class="r">' + money0(annUSD(r)) + '</td><td class="r"><b>' + money(pp) + '</b></td><td class="r">' + money(annUSD(r) * rate / 12) + '</td><td class="r">' + money0(annUSD(r) * rate) + '</td>' +
             '<td>' + (r.freq === 'mo' ? '' : lp === undefined ? '<span class="psub">' + (last ? 'not in last payroll' : '') + '</span>' : '<span class="' + (off ? 'badtxt' : 'psub') + '">' + money(lp) + (off ? ' (differs)' : '') + '</span>') + '</td></tr>' +
             (open ? '<tr class="phist"><td colspan="9">' + (hist.length ? hist.map(x => '<span>' + esc(payDate(x.p.date)) + ' · ' + esc(x.p.what || '') + ' · <b>' + money(x.p.amount) + '</b></span>').join('') : '<span class="psub">No payments to ' + esc(payName(r)) + ' yet</span>') + '</td></tr>' : '');
@@ -4766,7 +4790,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const nx = nextPayroll(all), last = runs.find(r => r.two), lastPaid = {};
     (last ? last.xs : []).forEach(x => { lastPaid[x.p.payee] = x.p; });
     const rows = [], seen = new Set();
-    cfg.roster.filter(r => r.active !== false && r.freq !== 'mo').forEach(r => {
+    rosterList(cfg).filter(r => r.active !== false && r.freq !== 'mo').forEach(r => {
       const nm = payName(r), lp = lastPaid[nm], pp = perPay(r, rate), st = sheetDate(r.start); seen.add(nm);
       const info = /tbd/i.test(r.start || '') ? 'Start date TBD' : st && nx && st > D.toISO(nx.start) ? 'Starts ' + payDate(st) + ': full pay assumed' : !lp ? 'New: not in the last payroll' : Math.abs(lp.amount - pp) > 1 ? 'Last paid ' + money(lp.amount) : '';
       rows.push({ on: !/tbd/i.test(r.start || ''), payee: nm, site: r.site || (lp && lp.site) || '', amount: pp, what: '', info, warn: !!info });
@@ -4885,7 +4909,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="roTitle"><div class="sheet-head"><h2 id="roTitle">Roster</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
       '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
       '<p class="hint">Salaries are yearly in US dollars, like your sheet. For someone paid a fixed amount in dirhams, type it like <b>4000 AED/mo</b>. “Name in payroll” is how they’re written in the cash-flow sheet, if different. Untick someone who has left.</p>' +
-      '<div class="pscroll"><table class="btable"><thead><tr><th></th>' + ROSTER_COLS.map(([k, l]) => '<th' + (k === 'usd' || k === 'housing' ? ' class="r"' : '') + '>' + l + '</th>').join('') + '<th class="r">Each pay AED</th><th></th></tr></thead><tbody id="roRows">' + cfg.roster.map(rosterRowHtml).join('') + '</tbody></table></div>' +
+      '<div class="pscroll"><table class="btable"><thead><tr><th></th>' + ROSTER_COLS.map(([k, l]) => '<th' + (k === 'usd' || k === 'housing' ? ' class="r"' : '') + '>' + l + '</th>').join('') + '<th class="r">Each pay AED</th><th></th></tr></thead><tbody id="roRows">' + rosterList(cfg).map(rosterRowHtml).join('') + '</tbody></table></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn" data-radd="1">' + I.plus + 'Add person</button><span class="spacer"></span><label class="hint">Dirhams per dollar <input class="ctl rate" id="ro_rate" value="' + (cfg.rate || 3.67) + '" inputmode="decimal"></label></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn solid" data-rsave="1">Save roster</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="spacer"></span><b id="roSum"></b></div></div></div>';
     $('#sheet').hidden = false; rosterSum();
@@ -5117,7 +5141,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const go = () => needVault().then(ok => { if (ok) render(); });
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
@@ -5133,6 +5157,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d.payedit) return openPayForm(d.payedit);
       if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
+      if (d.rosteraz) { (async () => { snapshot(); await setPayCfg({ rosterSort: 'alpha' }); renderMain(); toast('Payroll order: A–Z', true); })(); return; }
       if (d.sheetmore) { ui.sheetLimit = (ui.sheetLimit || 150) + 300; renderMain(); return; }
       if (d.sadd) { (async () => { snapshot(); const t = await addPayment({ status: d.sadd, date: d.sadd === 'paid' ? todayISO() : '' }); save(); ui.payFind = ''; renderMain(); const f = document.querySelector('tr[data-sid="' + t.id + '"] .s-payee'); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } })(); return; }
       if (d.sdel) { if (!b.dataset.sure) { b.dataset.sure = '1'; b.classList.add('danger-btn'); b.title = 'Click again to delete'; return; } const t = taskById(d.sdel); if (t) { snapshot(); trashTask(t); save(); renderMain(); toast('Row moved to Recently deleted', true); } return; }
@@ -5152,15 +5177,23 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     });
     // Pending: drag a row to change the order (saved with the payment)
     const content = $('#content');
-    content.addEventListener('dragstart', e => { const r = ui.view === 'payments' && e.target.closest && e.target.closest('.prow[data-pdrag]'); if (!r) return; ui.payDrag = r.dataset.pdrag; r.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', ui.payDrag); e.dataTransfer.effectAllowed = 'move'; } catch (err) { } });
-    content.addEventListener('dragover', e => { if (!ui.payDrag) return; const r = e.target.closest('.prow[data-pdrag]'); if (!r) return; e.preventDefault(); const after = e.clientY > r.getBoundingClientRect().top + r.offsetHeight / 2; document.querySelectorAll('.prow.drop-before,.prow.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); if (r.dataset.pdrag !== ui.payDrag) r.classList.add(after ? 'drop-after' : 'drop-before'); });
-    content.addEventListener('drop', e => {
-      if (!ui.payDrag) return; const r = e.target.closest('.prow[data-pdrag]'); if (!r) return; e.preventDefault();
-      const after = r.classList.contains('drop-after'), ids = [...document.querySelectorAll('.prow[data-pdrag]')].map(x => x.dataset.pdrag).filter(id => id !== ui.payDrag);
-      if (r.dataset.pdrag !== ui.payDrag) ids.splice(ids.indexOf(r.dataset.pdrag) + (after ? 1 : 0), 0, ui.payDrag); else ids.splice(ids.length, 0);
-      snapshot(); ids.forEach((id, i) => { const t = taskById(id), p = t && payOf(t); if (p) p.order = i; }); ui.payDrag = null; save(); renderMain();
+    const DRAG = '.prow[data-pdrag], .prow[data-rdrag], tr[data-rdrag]';
+    const dragKey = el => el.dataset.pdrag ? 'p:' + el.dataset.pdrag : 'r:' + el.dataset.rdrag;
+    content.addEventListener('dragstart', e => { const r = ui.view === 'payments' && e.target.closest && e.target.closest(DRAG); if (!r) return; ui.payDrag = { key: dragKey(r), kind: r.dataset.pdrag ? 'p' : 'r', box: r.parentElement }; r.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', ui.payDrag.key); e.dataTransfer.effectAllowed = 'move'; } catch (err) { } });
+    const clearMarks = () => document.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    content.addEventListener('dragover', e => {
+      const d = ui.payDrag; if (!d) return; const r = e.target.closest(DRAG); if (!r || r.parentElement !== d.box) return;
+      e.preventDefault(); clearMarks(); if (dragKey(r) !== d.key) r.classList.add(e.clientY > r.getBoundingClientRect().top + r.offsetHeight / 2 ? 'drop-after' : 'drop-before');
     });
-    content.addEventListener('dragend', () => { if (!ui.payDrag) return; ui.payDrag = null; document.querySelectorAll('.prow.dragging,.prow.drop-before,.prow.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
+    content.addEventListener('drop', e => {
+      const d = ui.payDrag; if (!d) return; const r = e.target.closest(DRAG); if (!r || r.parentElement !== d.box) return; e.preventDefault();
+      const after = r.classList.contains('drop-after'), keys = [...new Set([...d.box.children].filter(x => x.matches(DRAG)).map(dragKey))].filter(k => k !== d.key);
+      if (dragKey(r) !== d.key) keys.splice(keys.indexOf(dragKey(r)) + (after ? 1 : 0), 0, d.key); else return;
+      ui.payDrag = null; clearMarks();
+      if (d.kind === 'p') { snapshot(); keys.forEach((k, i) => { const t = taskById(k.slice(2)), p = t && payOf(t); if (p) p.order = i; }); save(); renderMain(); }
+      else rosterReorder(keys.map(k => k.slice(2)));
+    });
+    content.addEventListener('dragend', () => { if (!ui.payDrag) return; ui.payDrag = null; clearMarks(); document.querySelectorAll('.dragging').forEach(x => x.classList.remove('dragging')); });
     $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; ui.paySel = new Set(); const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
     $('#content').addEventListener('change', e => {
       if (!e.target.closest || !e.target.closest('table.sheet')) return;
