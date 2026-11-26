@@ -1673,6 +1673,37 @@
     $('#qa').placeholder = ui.qaEvent ? 'Add an event' + (ui.qaDate ? ' on ' + D.dueLabel(ui.qaDate) : '') + (isPhone() ? '' : ', e.g. Dinner with Sam 7pm') : (isPhone() ? 'Add a task' : 'Add a task, e.g. dentist fri 3pm');
     updatePreview(); $('#qa').focus();
   }
+  // Editing the title of an existing task or event: dates, times, repeats, reminders (and #lists, start dates for tasks)
+  // typed into it are read like in the add box when you leave the title. A time or repeat on its own keeps the item's date.
+  function parseTitleEdit(t) {
+    if (!t || (t.type && !isEvent(t)) || t.holiday) return null;
+    const v = (t.title || '').trim(); if (!v) return null;
+    let p = D.parseQuick(v, isEvent(t) ? [] : S.lists, new Date(), isEvent(t) ? {} : { noRange: true });
+    const found = p.dateTyped || p.time || p.recur || p.reminder || p.start || p.listId || p.end;
+    if (!found || p.title === v) return null;
+    if (!p.dateTyped && t.due) { // keep the date (and time) it already has; the new bits apply to it
+      const p2 = D.parseQuick(v + ' ' + t.due + (t.time && !p.time ? ' ' + t.time : ''), isEvent(t) ? [] : S.lists, new Date(), isEvent(t) ? {} : { noRange: true });
+      if (p2.due === t.due) p = Object.assign(p2, { title: p.title, keepTime: !p.time });
+    }
+    return p;
+  }
+  function applyTitleEdit(t) {
+    const p = parseTitleEdit(t); if (!p) return false;
+    snapshot();
+    const oldDue = t.due, oldTime = t.time, said = [];
+    t.title = p.title;
+    if (p.due && p.due !== t.due) { t.due = p.due; said.push(D.dueLabel(p.due)); }
+    if (p.time && !p.end && !p.keepTime && p.time !== t.time) { t.time = p.time; said.push(D.fmtTime(p.time)); }
+    if (isEvent(t) && p.end) { t.end = p.end; t.time = null; said.push('to ' + D.dueLabel(p.end)); }
+    if (p.recur) { t.recur = p.recur; said.push(D.recurText(p.recur).toLowerCase()); }
+    if (p.reminder) { t.reminder = p.reminder; t.remRule = null; t.remindedFor = null; said.push('remind ' + D.reminderLabel(p.reminder)); }
+    else if (t.due !== oldDue || t.time !== oldTime) { rebaseReminder(t, oldDue, oldTime); if (t.due !== oldDue || t.time !== oldTime) t.remindedFor = null; }
+    if (!isEvent(t) && p.start) { t.start = p.start; said.push('starts ' + D.dueLabel(p.start)); }
+    if (!isEvent(t) && p.listId && listById(p.listId)) { t.listId = p.listId; said.push('in ' + listById(p.listId).name); }
+    save(); render();
+    toast('Set: ' + (said.join(', ') || 'updated'), true);
+    return true;
+  }
   function quickParse(v) {
     const p = D.parseQuick(v, S.lists);
     // On the phone calendar, a task typed without a date lands on the day you picked
@@ -2149,6 +2180,12 @@
         const p = D.parseQuick('x ' + (/^every|daily|weekly|monthly|yearly|weekdays/i.test(v) ? v : 'every ' + v), []);
         hint.textContent = p.recur ? D.recurText(p.recur) + '. Press Enter to apply.' : 'Not recognized yet. Try "every 2 weeks" or "every mon and thu".';
       }
+    });
+    // Leaving the title: read any date, time or repeat typed into it (only if the title was changed)
+    det.addEventListener('focusin', e => { if (e.target.id === 'dTitle') e.target.dataset.was = e.target.value; });
+    det.addEventListener('focusout', e => {
+      if (e.target.id !== 'dTitle' || e.target.dataset.was === e.target.value) return;
+      const t = taskById(ui.selected); if (t) setTimeout(() => applyTitleEdit(t), 0);
     });
     det.addEventListener('keydown', e => {
       const t = taskById(ui.selected); if (!t) return;

@@ -272,6 +272,7 @@
       return d;
     }
 
+    out.dateTyped = !!(due || out.rangeFrom); // a date was written (not just a time or a repeat)
     if (out.rangeFrom && !due) due = fromISO(out.rangeFrom);
     if (!due && out.recur) due = firstOccurrence(out.recur, today);
     if (!due && out.time) {
