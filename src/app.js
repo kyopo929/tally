@@ -3295,7 +3295,7 @@
       '<div class="nbody"><div class="ntitle">' + (raw.locked ? '<span class="lockmini">' + I.lock + '</span>' : '') + esc(noteTitle(raw)) + '</div>' +
       (d.holder ? '<div class="dholder">' + esc(d.holder) + '</div>' : '') +
       (x ? '<div class="expbadge ' + x.cls + '">' + esc(x.text) + '</div>' : '') + '</div>' +
-      (ui.docSel ? '<span class="dpick" aria-hidden="true">' + I.check + '</span>' : '<button type="button" class="npin dshare" data-dshare="' + d.id + '" aria-label="Share ' + esc(noteTitle(raw)) + '" title="Share">' + I.share + '</button>') + '</div>';
+      (ui.docSel ? '<span class="dpick" aria-hidden="true">' + I.check + '</span>' : ((raw.attachments || []).some(x => !x.arch) ? '<button type="button" class="npin dshare ddown" data-ddown="' + d.id + '" aria-label="Download ' + esc(noteTitle(raw)) + '" title="Download">' + I.download + '</button>' : '') + '<button type="button" class="npin dshare" data-dshare="' + d.id + '" aria-label="Share ' + esc(noteTitle(raw)) + '" title="Share">' + I.share + '</button>') + '</div>';
   }
 
   // ---- views
@@ -3676,6 +3676,7 @@
       if (e.target.closest('[data-vunlock]')) { needVault(); return; }
       const xa = e.target.closest('[data-exparch]'); if (xa) { snapshot(); const t = taskById(xa.dataset.exparch); t.archived = true; t.pinned = false; save(); render(); toast('Archived ' + docName(t), true); return; }
       const ds = e.target.closest('[data-dshare]'); if (ds) { e.stopPropagation(); shareItems([taskById(ds.dataset.dshare)]); return; }
+      const dd = e.target.closest('[data-ddown]'); if (dd) { e.stopPropagation(); const r = taskById(dd.dataset.ddown); if (r && r.locked && !vault.key) { toast('Unlock it first'); return; } if (r) filesOf([r]).then(fs => { if (!fs.length) { toast('Nothing to download yet'); return; } fs.forEach(f => downloadBlob(f, f.name)); toast(fs.length === 1 ? 'Downloaded' : fs.length + ' files downloaded'); }, () => toast('Couldn’t download it')); return; }
       if (e.target.closest('[data-dsharesel]')) { shareItems([...ui.docSel].map(taskById).filter(Boolean)); return; }
       if (e.target.closest('[data-dselcancel]')) { ui.docSel = null; renderMain(); return; }
       const pn = e.target.closest('[data-npin]'); if (pn) { e.stopPropagation(); const n = taskById(pn.dataset.npin); n.pinned = !n.pinned; save(); renderMain(); return; }
