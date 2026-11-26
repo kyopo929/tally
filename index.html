@@ -1282,6 +1282,8 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .btable.sheet tr.bad .s-payee { color: var(--danger); }
 .btable.sheet .ssec { padding: 10px 6px 6px; font-size: 12px; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--line) 30%, transparent); }
 .btable.sheet th:first-child, .btable.sheet td:first-child { width: 136px; }
+.pdate.pend, .btable.sheet .spend { color: #8a5a00; font-weight: 600; font-size: 12px; }
+.btable.sheet .spend { padding: 0 8px; }
 
 </style>
 </head>
@@ -4474,8 +4476,9 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
      Both are always locked: everything about them sits in `body`, scrambled with the passphrase before it's saved or synced.
      Nothing about payments is in the code. Columns follow the cash-flow sheet:
      Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes. */
-  const PAY_ST = [['req', 'Requested'], ['ok', 'Approved'], ['paid', 'Paid']];
-  const PAY_NAME = Object.fromEntries(PAY_ST);
+  const PAY_ST = [['req', 'Pending'], ['paid', 'Paid']]; // you request, approve and pay yourself: just Pending or Paid ('ok' from before counts as Pending)
+  const isPaid = p => p.status === 'paid';
+  const PAY_NAME = Object.assign(Object.fromEntries(PAY_ST), { ok: 'Pending' });
   const payOf = t => ((vault.plain[t.id] || {}).body) || null;
   const pays = () => vault.key ? S.tasks.filter(isPay).map(t => ({ t, p: payOf(t) })).filter(x => x.p) : [];
   const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
@@ -4512,9 +4515,9 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   }
   const periodLabel = (s, e) => D.MON_SHORT[s.getMonth()] + ' ' + s.getDate() + ' to ' + D.MON_SHORT[e.getMonth()] + ' ' + e.getDate();
   const chaseWhy = p => [p.failed && !p.redone ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
-  const payTabs = [['topay', 'To pay'], ['runs', 'Payroll'], ['fc', 'Forecast'], ['chase', 'Chase'], ['all', 'All'], ['sheet', 'Sheet']];
+  const payTabs = [['all', 'All'], ['topay', 'Pending'], ['runs', 'Payroll'], ['fc', 'Forecast'], ['chase', 'Chase'], ['sheet', 'Sheet']];
   function payFilter(tab, all) {
-    if (tab === 'topay') return all.filter(x => x.p.status === 'req' || x.p.status === 'ok');
+    if (tab === 'topay') return all.filter(x => !isPaid(x.p));
     if (tab === 'chase') return all.filter(x => chaseWhy(x.p).length);
     return all;
   }
@@ -4552,14 +4555,13 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
     const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
-    const nextSt = { req: 'ok', ok: 'paid' }[p.status];
     return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + '">' +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
-      '<span class="pdate">' + esc(payDate(p.date)) + '</span>' +
+      '<span class="pdate' + (isPaid(p) ? '' : ' pend') + '">' + (isPaid(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
       '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || (p.dir === 'in' ? 'Head office' : p.what) || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
       (opts && opts.why && why.length ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
       '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
-      '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
+      '<button type="button" class="pst st-' + (isPaid(p) ? 'paid' : 'req') + '" data-paynext="' + x.t.id + '" title="Click to mark ' + (isPaid(p) ? 'Pending' : 'Paid') + '">' + (isPaid(p) ? 'Paid' : 'Pending') + '</button></div>';
   }
   // Order for lists and Excel: by date; on each date a person's lines stay together, regular pay first, then adjustments
   function payOrder(xs) {
@@ -4599,11 +4601,11 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const title = 'Payments';
     if (!vault.key) return { title, sub: 'Locked', actions: '', html: '<div class="empty"><strong>Payments are locked</strong>They’re scrambled with your passphrase, so only you can read them.<div style="margin-top:14px"><button type="button" class="chipbtn solid" data-payunlock="1">' + I.lock + (vaultItem() ? 'Unlock' : 'Choose a passphrase') + '</button></div></div>' };
     const all = pays().sort((a, b) => (b.p.date || '').localeCompare(a.p.date || '') || (b.t.createdAt - a.t.createdAt));
-    const tab = ui.payTab || 'topay'; if (!ui.paySel) ui.paySel = new Set();
+    const tab = ui.payTab || 'all'; if (!ui.paySel) ui.paySel = new Set();
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
     let html = '<div class="ntabs ptabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
     const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button>' + (extra || '') + '<span class="spacer"></span>' +
-      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="ok">Approve</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
+      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="req">Mark pending</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
       '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
     if (tab === 'runs') html += renderPayroll(all);
     else if (tab === 'sheet') html += bar() + renderSheet(all);
@@ -4615,7 +4617,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
-        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · pay date ' + esc(payDate(rs[0].p.date)) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
+        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · pay date ' + esc(payDate(rs[0].p.date)) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button><button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>'; });
         xs = loose;
       }
       ui.payShown = xs.map(x => x.t.id);
@@ -4623,7 +4625,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       else if (!(tab === 'topay' && payFilter('topay', all).length)) html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, payrolls you set up, and Pending or Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
     }
     const toPay = payFilter('topay', all);
-    return { title, sub: toPay.length ? toPay.length + ' to pay · AED ' + money(payTotal(toPay)) : 'Nothing to pay', html, actions: lockBtn() };
+    return { title, sub: toPay.length ? toPay.length + ' pending · AED ' + money(payTotal(toPay)) : 'Nothing pending', html, actions: lockBtn() };
   }
 
   /* ---- Sheet: every payment as an editable spreadsheet, in the cash-flow sheet's columns ---- */
@@ -4631,9 +4633,9 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function sheetRowHtml(x, bal) {
     const p = x.p, dep = p.dir === 'in' || p.failed || p.twice ? money(p.amount) : '', chk = p.dir === 'in' ? '' : money(p.amount);
     const cell = (k, v, cls, attrs) => '<td><input class="ctl s-' + k + (cls ? ' ' + cls : '') + '" value="' + esc(v == null ? '' : v) + '"' + (attrs || '') + '></td>';
-    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + '">' + cell('date', p.date || '', '', ' type="date"') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
+    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + '">' + (isPaid(p) ? cell('date', p.date || '', '', ' type="date"') : '<td class="spend">Pending</td>') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
       cell('dep', dep, 'r', ' inputmode="decimal"') + cell('chk', chk, 'r', ' inputmode="decimal"') + '<td class="r sbal' + (bal < 0 ? ' neg' : '') + '">' + (bal == null ? '' : money(bal)) + '</td>' + cell('note', p.note) +
-      '<td><select class="ctl s-status sm">' + PAY_ST.map(([k, l]) => '<option value="' + k + '"' + (p.status === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
+      '<td><select class="ctl s-status sm">' + PAY_ST.map(([k, l]) => '<option value="' + k + '"' + ((isPaid(p) ? 'paid' : 'req') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
       '<td><button type="button" class="iconbtn" data-sdel="' + x.t.id + '" aria-label="Delete row" title="Delete row">' + I.x + '</button></td></tr>';
   }
   function renderSheet(all) {
@@ -4646,8 +4648,8 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
       (fp.length > shown.length ? '<div class="more-wrap"><button type="button" class="chipbtn" data-sheetmore="1">Show ' + Math.min(300, fp.length - shown.length) + ' older rows</button></div>' : '') +
       '<div class="pscroll sheetwrap"><table class="btable sheet">' + head + '<tbody>' + shown.map(x => sheetRowHtml(x, bal.get(x.t.id))).join('') + '</tbody>' +
-      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Not paid yet (' + fo.length + ') · not in the balance</td></tr>' + fo.map(x => sheetRowHtml(x, null)).join('') + '</tbody>' : '') + '</table></div>' +
-      '<div class="paybar"><button type="button" class="chipbtn" data-sadd="paid">' + I.plus + 'Row (paid)</button><button type="button" class="chipbtn" data-sadd="req">' + I.plus + 'Row (to pay)</button><span class="spacer"></span><span class="hint">' + (cfg.balance == null ? 'Enter your bank balance in the Forecast tab to fill the Balance column.' : 'Balance ends at your bank balance of ' + money(cfg.balance) + ' (entered ' + esc(payDate(cfg.balanceDate)) + '). Enter moves down, like Excel.') + '</span></div>';
+      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Pending (' + fo.length + ') · not in the balance yet</td></tr>' + fo.map(x => sheetRowHtml(x, null)).join('') + '</tbody>' : '') + '</table></div>' +
+      '<div class="paybar"><button type="button" class="chipbtn" data-sadd="paid">' + I.plus + 'Row (paid)</button><button type="button" class="chipbtn" data-sadd="req">' + I.plus + 'Row (pending)</button><span class="spacer"></span><span class="hint">' + (cfg.balance == null ? 'Enter your bank balance in the Forecast tab to fill the Balance column.' : 'Balance ends at your bank balance of ' + money(cfg.balance) + ' (entered ' + esc(payDate(cfg.balanceDate)) + '). Enter moves down, like Excel.') + '</span></div>';
     return h;
   }
   // A cell was changed: write it to the payment
@@ -4661,7 +4663,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d && c && Math.abs(d - c) < 0.01) { p.amount = c; p.dir = 'out'; if (!p.failed) p.twice = true; }
       else if (d && c) { p.amount = r2(Math.abs(c - d)); p.dir = c > d ? 'out' : 'in'; p.twice = false; p.failed = false; }
       else { p.amount = d || c; p.dir = d ? 'in' : 'out'; p.twice = false; p.failed = false; }
-    } else if (k === 'status') { p.status = v; if (v === 'paid' && !p.date) p.date = todayISO(); }
+    } else if (k === 'status') { if (v === 'paid' && !isPaid(p)) p.date = todayISO(); p.status = v; } // paid today
     else p[{ date: 'date', payee: 'payee', check: 'check', site: 'site', what: 'what', note: 'note' }[k]] = v;
     save();
   }
@@ -4703,7 +4705,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     h += '<div class="psec"><h3>History <span class="n">' + runs.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-paybasket="" data-kind="blank">' + I.plus + 'Payroll from scratch</button></div>';
     const tw = runs.filter(r => r.two).slice(0, 12).reverse();
     if (tw.length > 1) { const mx = Math.max(...tw.map(r => payTotal(r.all))); h += '<div class="paychart" aria-label="2-week payroll totals">' + tw.map(r => '<div title="' + esc(r.name) + ': AED ' + money(payTotal(r.all)) + '"><i style="height:' + Math.max(4, Math.round(payTotal(r.all) / mx * 100)) + '%"></i><span>' + esc(payDate(r.date)) + '</span></div>').join('') + '</div>'; }
-    if (!runs.length) h += empty('No payroll yet', 'Import your sheet (“Import from sheet” in the To pay tab) or set up a payroll from scratch.');
+    if (!runs.length) h += empty('No payroll yet', 'Import your sheet (“Import from sheet” in the All tab) or set up a payroll from scratch.');
     runs.slice(0, ui.runLimit || 12).forEach(r => {
       const open = ui.payOpen === r.name, paid = r.all.filter(x => x.p.status === 'paid' && !x.p.failed).length, bad = r.all.filter(x => x.p.failed && !x.p.redone).length, added = r.all.length - r.xs.length;
       h += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(r.name) + '">' + I.chev + '<span class="pwho">' + esc(r.name) + '</span><span class="psub">Paid ' + esc(payDate(r.date)) + ' · ' + r.xs.length + ' people' + (added ? ' + ' + added + ' added' : '') + ' · ' + (paid === r.all.length ? 'all paid' : paid + ' paid') + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(r.all)) + '</span></button>' +
@@ -4760,7 +4762,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       '<div class="pscroll"><table class="btable"><thead><tr><th></th><th>Name</th><th>Project</th><th class="r">Amount AED</th><th>Note (leave empty for regular pay)</th><th></th><th></th></tr></thead><tbody id="bkRows">' + b.rows.map(basketRowHtml).join('') + '</tbody></table></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn" data-badd="1">' + I.plus + 'Add line</button><button type="button" class="chipbtn" data-bpaste="1">Paste from Excel</button><span class="spacer"></span><b id="bkSum"></b></div>' +
       '<div id="bkPaste" hidden><textarea class="ctl" id="bk_paste" rows="5" placeholder="Copy rows from your sheet (Date to notes) or Name, Project, Amount lines, and paste here"></textarea><div class="pform-acts"><button type="button" class="chipbtn" data-bpasteadd="1">Add these lines</button></div></div>' +
-      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-bsave="1">' + (b.edit ? 'Save changes' : 'Add to To pay') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="bkMsg"></span></div></div></div>';
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-bsave="1">' + (b.edit ? 'Save changes' : 'Add to Pending') + '</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="bkMsg"></span></div></div></div>';
     $('#sheet').hidden = false; basketSum();
   }
   function basketRead() {
@@ -4789,7 +4791,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (r.carry) { const ct = taskById(r.carry), cp = ct && payOf(ct); if (cp) cp.redone = true; }
     }
     if (edit) pays().filter(x => x.p.run === edit && !keep.has(x.t.id)).forEach(x => trashTask(x.t));
-    save(); closeSheet(); ui.basket = null; ui.payTab = 'topay'; render(); toast(edit ? 'Payroll saved' : use.length + ' payments added to To pay', true);
+    save(); closeSheet(); ui.basket = null; ui.payTab = 'topay'; render(); toast(edit ? 'Payroll saved' : use.length + ' payments added to Pending', true);
   }
   // Payroll lines from Excel: the sheet's rows (Date … notes), or Name, Project, Amount[, what it's for]
   function parseRunLines(text) {
@@ -4870,15 +4872,15 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     snapshot(); await setPayCfg({ roster: rs, rate }); closeSheet(); render(); toast('Roster saved', true);
   }
 
-  /* ---- Forecast: payroll from the roster, month-end staff, repeating payments, To pay items ---- */
+  /* ---- Forecast: payroll from the roster, month-end staff, repeating payments, Pending items ---- */
   const EVERY = [['2w', 'Every 2 weeks'], ['mo', 'Monthly'], ['q', 'Every 3 months'], ['6m', 'Every 6 months'], ['y', 'Yearly'], ['once', 'Once']];
   const EVERY_NAME = Object.fromEntries(EVERY);
   const stepDate = (d, every) => every === '2w' ? D.addDays(d, 14) : D.addMonths(d, { mo: 1, q: 3, '6m': 6, y: 12 }[every] || 1);
   function forecastEvents(all, months) {
     const cfg = payCfg(), rate = cfg.rate || 3.67, T = payrollTotals(cfg), today = D.startOfDay(new Date()), endD = D.addMonths(today, months), runs = payRuns(all), ev = [];
     const add = (d, label, amt, kind) => { if (d >= today && d <= endD) ev.push({ d, label, amt, kind }); };
-    // already set up and not paid yet (To pay), including Pending and Due rows
-    all.filter(x => x.p.status === 'req' || x.p.status === 'ok').forEach(x => { const d = x.p.date ? D.fromISO(x.p.date) : today; add(d < today ? today : d, (x.p.payee || x.p.what || 'Payment') + (x.p.run ? ' (payroll ' + x.p.run + ')' : ''), (x.p.dir === 'in' ? 1 : -1) * x.p.amount, x.p.run ? 'pay' : 'other'); });
+    // already set up and not paid yet (Pending), including Pending and Due rows from the sheet
+    all.filter(x => !isPaid(x.p)).forEach(x => { const d = x.p.date ? D.fromISO(x.p.date) : today; add(d < today ? today : d, (x.p.payee || x.p.what || 'Payment') + (x.p.run ? ' (payroll ' + x.p.run + ')' : ''), (x.p.dir === 'in' ? 1 : -1) * x.p.amount, x.p.run ? 'pay' : 'other'); });
     // 2-week payroll: from the roster (new people at full pay), or the last payroll if there's no roster
     const nx = nextPayroll(all), last = runs.find(r => r.two), twoAmt = cfg.roster.length ? T.twoPay : last ? payTotal(last.xs) : 0;
     if (nx && twoAmt) for (let d = D.fromISO(nx.date); d <= endD; d = D.addDays(d, 14)) { if (!runs.some(r => r.date && Math.abs(D.diffDays(D.fromISO(r.date), d)) <= 5)) add(d, 'Payroll (every 2 weeks)', -twoAmt, 'pay'); }
@@ -4903,7 +4905,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     if (neg) h += '<div class="pwarn">The balance goes below zero in <b>' + esc(monthName(neg.ms)) + '</b> (AED ' + money(neg.end) + ' at the end of the month)' + (low !== neg ? ' and is lowest in <b>' + esc(monthName(low.ms)) + '</b> (AED ' + money(low.end) + ')' : '') + '.</div>';
     h += '<div class="pscroll"><table class="ptable fc"><thead><tr><th>Month</th><th class="r">Payroll</th><th class="r">Month-end</th><th class="r">Other payments</th><th class="r">Money in</th><th class="r">Net</th><th class="r">' + (bal == null ? 'Running total' : 'Balance at month end') + '</th></tr></thead><tbody>' +
       rows.map(r => '<tr><td>' + esc(monthName(r.ms)) + '</td><td class="r">' + money0(-r.pay) + '</td><td class="r">' + money0(-r.mo) + '</td><td class="r">' + money0(-r.other) + '</td><td class="r in">' + money0(r.inn) + '</td><td class="r' + (r.net < 0 ? ' neg' : '') + '">' + money0(r.net) + '</td><td class="r' + (r.end < 0 ? ' neg' : '') + '"><b>' + money0(r.end) + '</b><span class="psub">$' + money0(r.end / rate) + '</span></td></tr>').join('') + '</tbody></table></div>' +
-      '<p class="hint pcenter">Payroll uses the roster (new people at full 2-week pay). Payrolls and payments already in To pay are counted on their date instead.</p>';
+      '<p class="hint pcenter">Payroll uses the roster (new people at full 2-week pay). Payrolls and payments already in Pending are counted on their date instead.</p>';
     // repeating payments
     const rec = cfg.recurring.slice().sort((a, b) => (a.next || '').localeCompare(b.next || ''));
     h += '<div class="psec"><h3>Repeating payments <span class="n">' + rec.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-recfind="1">Find them in my history</button><button type="button" class="chipbtn" data-recedit="1">Edit</button></div>';
@@ -4971,7 +4973,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const notes = [], add = s => { if (s && !notes.some(n => n.toLowerCase().includes(s.toLowerCase()))) notes.push(s); };
     add(p.note); if (p.failed) add('payment did not go through'); if (p.receipt === 'no') add('Need receipt'); add(p.chase);
     const dep = p.dir === 'in' || p.failed || p.twice ? p.amount : '', chk = p.dir === 'in' ? '' : p.amount;
-    return [xlDate(p.date), p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
+    return [isPaid(p) ? xlDate(p.date) : 'Pending', p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
   }
   function payCopy(xs) {
     const rows = payOrder(xs).map(x => payXlRow(x.p));
@@ -5017,7 +5019,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   }
 
   /* ---- import rows from the cash-flow sheet ---- */
-  // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows become To pay; the rest are already paid.
+  // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows come in as Pending; the rest are already paid.
   function parseSheetRows(text) {
     const out = [], soon = D.toISO(D.addDays(new Date(), 7)); let lastDate = null, lastVendor = '', ctx = null, plan = false; out.skipped = 0;
     String(text || '').split(/\r?\n/).forEach(line => {
@@ -5054,7 +5056,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   function openImport() {
     $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="piTitle"><div class="sheet-head"><h2 id="piTitle">Import from your sheet</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
       '<ol class="howto"><li>In Excel, select rows from the <b>Date</b> column across to the <b>notes</b> column (A to I).</li><li>Press <b>Ctrl+C</b>.</li><li>Click the box below and press <b>Ctrl+V</b>.</li></ol>' +
-      '<p class="hint">Rows marked Pending or Due go to To pay. Everything else comes in as already paid. Rows already in Tally are skipped, so pasting the same rows twice is safe. The data is scrambled on this device before it syncs.</p>' +
+      '<p class="hint">Rows marked Pending or Due come in as Pending. Everything else comes in as already paid. Rows already in Tally are skipped, so pasting the same rows twice is safe. The data is scrambled on this device before it syncs.</p>' +
       '<div class="field"><label for="pi_rows">Rows from the sheet</label><textarea class="ctl" id="pi_rows" rows="10"></textarea></div>' +
       '<p class="hint" id="piSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payimportgo="1">Import</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="piMsg"></span></div></div></div>';
     $('#sheet').hidden = false; setTimeout(() => $('#pi_rows') && $('#pi_rows').focus(), 30);
@@ -5063,7 +5065,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const el = $('#piSum'); if (!el) return;
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value), fresh = rows.filter(r => !have.has(payKey(r)));
     const runs = new Set(fresh.filter(r => r.run).map(r => r.run)).size, tp = fresh.filter(r => r.status === 'req').length, bad = fresh.filter(r => r.failed && !r.redone).length;
-    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + (rows.rounding ? ' · ' + rows.rounding + ' rounding rows left out' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
+    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' pending' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + (rows.rounding ? ' · ' + rows.rounding + ' rounding rows left out' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
   }
   async function saveImport() {
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value).filter(r => !have.has(payKey(r)));
@@ -5106,10 +5108,10 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
       if (d.runmore) { ui.runLimit = (ui.runLimit || 12) + 24; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
-      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { x.p.status = st; }); save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
-      if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], { req: 'ok', ok: 'paid' }[p.status]); return; }
+      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { if (st === 'paid' && !isPaid(x.p)) x.p.date = todayISO(); x.p.status = st; }); /* marked paid: paid today */ save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
+      if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], isPaid(p) ? 'req' : 'paid'); return; }
       if (d.paystatus) { set(pays().filter(x => ui.paySel.has(x.t.id)), d.paystatus); ui.paySel = new Set(); renderMain(); return; }
-      if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && x.p.status !== 'paid' && (d.to !== 'ok' || x.p.status === 'req')), d.to); return; }
+      if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && !isPaid(x.p)), d.to); return; }
       if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
     });
     $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; ui.paySel = new Set(); const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });

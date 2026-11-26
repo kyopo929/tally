@@ -1269,3 +1269,5 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .btable.sheet tr.bad .s-payee { color: var(--danger); }
 .btable.sheet .ssec { padding: 10px 6px 6px; font-size: 12px; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--line) 30%, transparent); }
 .btable.sheet th:first-child, .btable.sheet td:first-child { width: 136px; }
+.pdate.pend, .btable.sheet .spend { color: #8a5a00; font-weight: 600; font-size: 12px; }
+.btable.sheet .spend { padding: 0 8px; }
