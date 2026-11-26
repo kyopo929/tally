@@ -1345,6 +1345,26 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
 .bform .plist { max-width: none; }
 
+/* Spending: 8 categories use the validated categorical order (slots 1-8) */
+.fcdash { --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647; }
+:root[data-theme="dark"] .fcdash, :root[data-theme="dark"] .spt { --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fcdash, :root:not([data-theme="light"]) .spt { --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; } }
+.spt { --s1: #257de0; --s2: #f47230; --s3: #00b894; --s4: #f2a600; --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647; }
+:root[data-theme="dark"] .spt { --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .spt { --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05; } }
+.fcsvg .s1 { fill: var(--s1); } .fcsvg .s2 { fill: var(--s2); } .fcsvg .s3 { fill: var(--s3); } .fcsvg .s4 { fill: var(--s4); } .fcsvg .s5 { fill: var(--s5); } .fcsvg .s6 { fill: var(--s6); } .fcsvg .s7 { fill: var(--s7); } .fcsvg .s8 { fill: var(--s8); }
+.fclegend .s1, .spt .s1 { background: var(--s1); } .fclegend .s2, .spt .s2 { background: var(--s2); } .fclegend .s3, .spt .s3 { background: var(--s3); } .fclegend .s4, .spt .s4 { background: var(--s4); }
+.fclegend .s5, .spt .s5 { background: var(--s5); } .fclegend .s6, .spt .s6 { background: var(--s6); } .fclegend .s7, .spt .s7 { background: var(--s7); } .fclegend .s8, .spt .s8 { background: var(--s8); }
+.spdash { grid-template-columns: 1fr; }
+.spt { width: 100%; max-width: var(--payw); }
+.spt tbody tr[data-spendopen] { cursor: pointer; } .spt tbody tr[data-spendopen]:hover { background: var(--hover); }
+.spt .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+.spbar { display: inline-block; width: 80px; height: 6px; margin-right: 8px; border-radius: 3px; background: color-mix(in srgb, var(--line) 70%, transparent); vertical-align: middle; overflow: hidden; }
+.spbar i { display: block; height: 100%; border-radius: 3px; }
+.spt .phist .plist { max-width: none; margin: 4px 0; }
+.pbal label { font-size: 13px; }
+.fctip[hidden] { display: none; }
+
 </style>
 </head>
 <body>
@@ -4583,7 +4603,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
   }
   const periodLabel = (s, e) => D.MON_SHORT[s.getMonth()] + ' ' + s.getDate() + ' to ' + D.MON_SHORT[e.getMonth()] + ' ' + e.getDate();
   const chaseWhy = p => [p.failed && !p.redone ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
-  const payTabs = [['all', 'All'], ['topay', 'Pending'], ['runs', 'Payroll'], ['fc', 'Forecast'], ['chase', 'Chase'], ['sheet', 'Sheet']];
+  const payTabs = [['all', 'All'], ['topay', 'Pending'], ['runs', 'Payroll'], ['fc', 'Forecast'], ['spend', 'Spending'], ['chase', 'Chase'], ['sheet', 'Sheet']];
   function payFilter(tab, all) {
     if (tab === 'topay') return all.filter(x => !isPaid(x.p));
     if (tab === 'chase') return all.filter(x => chaseWhy(x.p).length);
@@ -4701,10 +4721,11 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
       (ui.paySel.size ? '<span class="psel">' + selTotal() + '</span><button type="button" class="chipbtn" data-paystatus="req">Mark pending</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
       '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
     const selOnly = ui.paySel.size ? '<div class="paybar"><span class="psel">' + selTotal() + '</span><span class="spacer"></span><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paycopy="sel">Copy for Excel</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button></div>' : '';
-    html = '<div class="pstick">' + html + (tab === 'runs' || tab === 'fc' ? selOnly : bar()) + '</div>'; // frozen on top while you scroll
+    html = '<div class="pstick">' + html + (tab === 'runs' || tab === 'fc' || tab === 'spend' ? selOnly : bar()) + '</div>'; // frozen on top while you scroll
     if (tab === 'runs') html += renderPayroll(all);
     else if (tab === 'sheet') html += renderSheet(all);
     else if (tab === 'fc') html += renderForecast(all);
+    else if (tab === 'spend') html += renderSpending(all);
     else {
       let xs = payFilter(tab, all);
       if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount, or a date like 2026-11" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; xs = payFind(xs); }
@@ -5032,6 +5053,72 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
   }
   // A bar with rounded top corners (only the top segment of a stack is rounded)
   function barPath(x, y, w, h, round) { if (h <= 0) return ''; const r = round ? Math.min(4, w / 2, h) : 0; return 'M' + x + ',' + (y + h) + 'V' + (y + r) + (r ? 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y : '') + 'H' + (x + w - r) + (r ? 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) : '') + 'V' + (y + h) + 'Z'; }
+
+  /* ---- Spending: where the money went (paid payments), by category or by project ---- */
+  const CATS = ['Payroll', 'Rent & housing', 'Insurance', 'Expense reports', 'Visas', 'Bonuses', 'Bank fees', 'Other'];
+  function catOf(p, rosterSet) {
+    if (p.cat && CATS.includes(p.cat)) return p.cat;
+    const t = ((p.payee || '') + ' ' + (p.what || '')).toLowerCase();
+    if (isFeePay(p)) return 'Bank fees';
+    if (/\bbonus/.test(t)) return 'Bonuses';
+    if (p.run || rosterSet.has(normName(p.payee))) return 'Payroll';
+    if (/\brent\b|lease|housing/.test(t)) return 'Rent & housing';
+    if (/insurance|premium/.test(t)) return 'Insurance';
+    if (/\bvisa/.test(t)) return 'Visas';
+    if (/report id|expense|petty cash/.test(t)) return 'Expense reports';
+    return 'Other';
+  }
+  function renderSpending(all) {
+    const cfg = payCfg(), rate = cfg.rate || 3.67, by = ui.spendBy || 'cat', per = ui.spendPer || '12', today = new Date();
+    const start = per === 'all' ? '' : per === 'ytd' ? today.getFullYear() + '-01-01' : D.toISO(new Date(today.getFullYear(), today.getMonth() - (+per - 1), 1));
+    const rosterSet = new Set(cfg.roster.flatMap(r => [normName(payName(r)), normName(r.name)]));
+    const paid = all.filter(x => isPaid(x.p) && x.p.date && x.p.date >= start && x.p.date <= todayISO() && !(x.p.failed && !x.p.redone) && !x.p.twice);
+    const out = paid.filter(x => x.p.dir !== 'in'), inn = paid.filter(x => x.p.dir === 'in');
+    if (!out.length) return empty('Nothing paid in this period', 'Paid payments show up here, by category and by month.') + spendControls(by, per);
+    // groups: categories in a fixed order, or projects (largest 7, the rest as Other)
+    const keyOf = x => by === 'cat' ? catOf(x.p, rosterSet) : (x.p.site || '(no project)');
+    let keys; if (by === 'cat') keys = CATS.filter(c => out.some(x => keyOf(x) === c));
+    else { const tot = {}; out.forEach(x => { tot[keyOf(x)] = (tot[keyOf(x)] || 0) + x.p.amount; }); const ks = Object.keys(tot).sort((a, b) => tot[b] - tot[a]); keys = ks.length > 8 ? ks.slice(0, 7).concat(['Other']) : ks; }
+    const grp = x => keys.includes(keyOf(x)) ? keyOf(x) : 'Other';
+    const months = [...new Set(out.map(x => x.p.date.slice(0, 7)))].sort(), first = months[0], mlist = [];
+    for (let d = D.fromISO(first + '-01'); D.toISO(d).slice(0, 7) <= todayISO().slice(0, 7); d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) mlist.push(D.toISO(d).slice(0, 7));
+    const cell = {}; out.forEach(x => { const k = grp(x) + '|' + x.p.date.slice(0, 7); cell[k] = (cell[k] || 0) + x.p.amount; });
+    const tot = k => mlist.reduce((s, m) => s + (cell[k + '|' + m] || 0), 0), totOut = out.reduce((s, x) => s + x.p.amount, 0), totIn = inn.reduce((s, x) => s + x.p.amount, 0);
+    const slot = k => 's' + (by === 'cat' ? CATS.indexOf(k) + 1 : keys.indexOf(k) + 1);
+    const ranked = keys.slice().sort((a, b) => tot(b) - tot(a));
+    let h = spendControls(by, per);
+    h += '<div class="pcards">' + '<div class="pcard"><small>Paid out</small>' + usdAed(totOut, rate, true) + '<em>' + out.length + ' payments · ' + mlist.length + ' month' + (mlist.length === 1 ? '' : 's') + '</em></div>' +
+      ranked.slice(0, 2).map(k => '<div class="pcard"><small>' + esc(k) + '</small>' + usdAed(tot(k), rate, true) + '<em>' + Math.round(tot(k) / totOut * 100) + '% of money out · ' + money0(tot(k) / mlist.length) + ' a month</em></div>').join('') + '</div>';
+    // chart: money out per month, stacked by group
+    const W = 900, H = 240, L = 64, R = 12, T = 12, B = 28, cw = (W - L - R) / mlist.length, bw = Math.min(34, cw * 0.6);
+    const nice = v => { const e = Math.pow(10, Math.floor(Math.log10(v || 1))), f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+    const kf = v => v >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : v >= 1e3 ? Math.round(v / 1e3) + 'k' : String(Math.round(v));
+    const top = nice(Math.max(1, ...mlist.map(m => keys.reduce((s, k) => s + (cell[k + '|' + m] || 0), 0)))), y = v => T + (H - T - B) * (1 - v / top);
+    let g = '<svg class="fcsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Money out by month">';
+    for (let i = 0; i <= 4; i++) { const v = top * i / 4; g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + kf(v) + '</text>'; }
+    mlist.forEach((m, i) => {
+      const x = L + cw * i + (cw - bw) / 2, d = D.fromISO(m + '-01'); let base = 0; const present = keys.filter(k => cell[k + '|' + m] > 0);
+      present.forEach((k, j) => { const v = cell[k + '|' + m], hh = y(base) - y(base + v); g += '<path class="' + slot(k) + '" d="' + barPath(x, y(base + v) + (base ? 1 : 0), bw, Math.max(0, hh - (base ? 1 : 0)), j === present.length - 1) + '"/>'; base += v; });
+      if (mlist.length <= 14 || i % 2 === 0) g += '<text class="ax" x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + D.MON_SHORT[d.getMonth()] + (d.getMonth() === 0 || i === 0 ? ' ’' + String(d.getFullYear()).slice(2) : '') + '</text>';
+      g += '<rect class="fchit" x="' + (L + cw * i) + '" y="' + T + '" width="' + cw + '" height="' + (H - T - B) + '" data-tip="' + esc(monthName(d)) + '|' + ranked.filter(k => cell[k + '|' + m]).map(k => esc(k) + ' ' + money0(cell[k + '|' + m])).join('|') + '|Total ' + money0(base) + '"/>';
+    });
+    g += '<line class="base" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0) + '" y2="' + y(0) + '"/></svg>';
+    const legend = '<div class="fclegend">' + keys.map(k => '<span><i class="' + slot(k) + '"></i>' + esc(k) + '</span>').join('') + '</div>';
+    h += '<div class="fcdash spdash"><div class="fccard"><h4>Money out by month (AED)</h4>' + legend + g + '</div><div class="fctip" hidden></div></div>';
+    // table: each group's total, share, monthly average; click to see its payments
+    h += '<div class="pscroll"><table class="ptable spt"><thead><tr><th>' + (by === 'cat' ? 'Category' : 'Project') + '</th><th class="r">Total AED</th><th class="r">USD</th><th class="r">Share</th><th class="r">Per month</th><th class="r">Payments</th></tr></thead><tbody>' +
+      ranked.map(k => { const xs = out.filter(x => grp(x) === k), open = ui.spendOpen === k; return '<tr data-spendopen="' + esc(k) + '" class="' + (open ? 'open' : '') + '"><td><i class="sw ' + slot(k) + '"></i><b>' + esc(k) + '</b></td><td class="r">' + money0(tot(k)) + '</td><td class="r">$' + money0(tot(k) / rate) + '</td><td class="r"><span class="spbar"><i class="' + slot(k) + '" style="width:' + Math.max(2, Math.round(tot(k) / totOut * 100)) + '%"></i></span>' + Math.round(tot(k) / totOut * 100) + '%</td><td class="r">' + money0(tot(k) / mlist.length) + '</td><td class="r">' + xs.length + '</td></tr>' +
+        (open ? '<tr class="phist"><td colspan="6"><div class="plist">' + xs.sort((a, b) => b.p.date.localeCompare(a.p.date)).slice(0, 60).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > 60 ? '<p class="hint">Showing the latest 60 of ' + xs.length + '.</p>' : '') + '</td></tr>' : ''); }).join('') +
+      '</tbody><tfoot><tr><td>Total paid out</td><td class="r">' + money0(totOut) + '</td><td class="r">$' + money0(totOut / rate) + '</td><td class="r">100%</td><td class="r">' + money0(totOut / mlist.length) + '</td><td class="r">' + out.length + '</td></tr>' +
+      '<tr><td>Money in</td><td class="r in">+' + money0(totIn) + '</td><td class="r">$' + money0(totIn / rate) + '</td><td></td><td class="r">' + money0(totIn / mlist.length) + '</td><td class="r">' + inn.length + '</td></tr></tfoot></table></div>' +
+      '<p class="hint pcenter">' + (by === 'cat' ? 'Categories are worked out from each payment (payroll, rent, insurance…). If one is wrong, open the payment and set its Category.' : 'Projects come from each payment’s Project.') + ' Click a row to see its payments. Payments that didn’t go through aren’t counted.</p>';
+    return h;
+  }
+  function spendControls(by, per) {
+    const opt = (id, cur, list) => '<select class="ctl" id="' + id + '">' + list.map(([k, l]) => '<option value="' + k + '"' + (cur === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+    return '<div class="pbal"><label>Group by</label>' + opt('spBy', by, [['cat', 'Category'], ['site', 'Project']]) + '<label>Period</label>' + opt('spPer', per, [['3', 'Last 3 months'], ['6', 'Last 6 months'], ['12', 'Last 12 months'], ['ytd', 'This year'], ['all', 'Everything']]) + '</div>';
+  }
+
   function renderForecast(all) {
     const cfg = payCfg(), rate = cfg.rate || 3.67, months = ui.fcMonths || 12, ev = forecastEvents(all, months), today = D.startOfDay(new Date());
     const after = cfg.balance == null ? [] : all.filter(x => isPaid(x.p) && x.p.date && x.p.date > (cfg.balanceDate || todayISO())); // paid since the balance was entered
@@ -5138,7 +5225,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
     return { tx, from: ds[0], to: ds[ds.length - 1], bal: bal != null ? bal : isFinite(last.bal) ? last.bal : null };
   }
   const isFeeLine = t => /^(charges|value added tax|vat\b)/i.test(t.text);
-  const isFeePay = p => /bank fee|charges|\bfees?\b|\bvat\b|value added tax/i.test(p.what || '');
+  const isFeePay = p => { const w = p.what || ''; return /\bbank (fees?|charges?)\b|^charges|tt corr|value added tax/i.test(w) || (/\b(fees?|charges?|vat)\b/i.test(w) && (Number(p.amount) || 0) < 500); }; // bank charges, not an accountant's or agency fee
   const feeVendor = () => { const c = {}; pays().filter(x => isFeePay(x.p) && x.p.payee).forEach(x => { c[x.p.payee] = (c[x.p.payee] || 0) + 1; }); return (Object.entries(c).sort((a, b) => b[1] - a[1])[0] || [''])[0]; }; // the name you use on your bank-fee rows
   const near = (a, b, n) => Math.abs(D.diffDays(D.fromISO(a), D.fromISO(b))) <= n;
   function bankMatch(st) {
@@ -5237,6 +5324,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
       '<div class="pgrid">' + f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') + '</div>' +
       '<label class="pcheck"><input type="checkbox" id="pf_failed"' + (p.failed ? ' checked' : '') + '> The transfer didn’t go through</label>' +
       (p.failed ? '<label class="pcheck"><input type="checkbox" id="pf_redone"' + (p.redone ? ' checked' : '') + '> Paid again since</label>' : '') +
+      f('cat', 'Category (for Spending)', '<select class="ctl" id="pf_cat">' + opt([['', 'Automatic']].concat(CATS.map(c => [c, c])), p.cat || '') + '</select>') +
       f('rec', 'Repeats', '<select class="ctl" id="pf_rec">' + opt([['', 'No']].concat(EVERY.filter(e => e[0] !== 'once')), (payCfg().recurring.find(r => raw && r.src === raw.id) || {}).every || '') + '</select>') +
       inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paycheck short by one day"') +
       f('note', 'Notes (copied to the sheet)', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
@@ -5251,7 +5339,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
     if (!isFinite(amt) || amt <= 0) { $('#pfMsg').textContent = 'Type the amount, like 1500.00'; return; }
     if (!(await needVault())) return;
     if (v('status') === 'sched' && !v('date')) { $('#pfMsg').textContent = 'Pick the date it goes out.'; return; }
-    const fields = { date: v('date') || (v('status') === 'paid' ? todayISO() : ''), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
+    const fields = { date: v('date') || (v('status') === 'paid' ? todayISO() : ''), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note'), cat: $('#pf_cat').value };
     snapshot();
     const raw = form.dataset.payid && taskById(form.dataset.payid);
     const t = raw || await addPayment(fields); if (raw) Object.assign(payOf(raw), fields);
@@ -5335,7 +5423,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
     $('#content').addEventListener('mousedown', e => { if (e.shiftKey && e.target.matches && e.target.matches('[data-paysel]')) e.preventDefault(); }); // no text highlighting on Shift-click
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-bankcheck],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-bankcheck],[data-spendopen],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
@@ -5357,6 +5445,7 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
       }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
       if (d.bankcheck) return openBankCheck();
+      if (d.spendopen !== undefined) { ui.spendOpen = ui.spendOpen === d.spendopen ? null : d.spendopen; const y = $('#content').scrollTop; renderMain(); $('#content').scrollTop = y; return; }
       if (d.rosteraz) { (async () => { snapshot(); await setPayCfg({ rosterSort: 'alpha' }); renderMain(); toast('Payroll order: A–Z', true); })(); return; }
       if (d.sheetmore) { ui.sheetLimit = (ui.sheetLimit || 150) + 300; renderMain(); return; }
       if (d.sadd) { (async () => { snapshot(); const t = await addPayment({ status: d.sadd, date: d.sadd === 'paid' ? todayISO() : '' }); save(); ui.payFind = ''; renderMain(); const f = document.querySelector('tr[data-sid="' + t.id + '"] .s-payee'); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } })(); return; }
@@ -5404,6 +5493,8 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
     $('#content').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest && e.target.closest('table.sheet') && e.target.matches('input')) { e.preventDefault(); const tr = e.target.closest('tr'), cls = [...e.target.classList].find(c => c.startsWith('s-')), nx = tr.nextElementSibling; e.target.blur(); if (nx && cls && $('.' + cls, nx)) $('.' + cls, nx).focus(); } });
     $('#content').addEventListener('change', async e => {
       if (e.target.id === 'fcMonths') { ui.fcMonths = +e.target.value; renderMain(); }
+      if (e.target.id === 'spBy') { ui.spendBy = e.target.value; ui.spendOpen = null; renderMain(); }
+      if (e.target.id === 'spPer') { ui.spendPer = e.target.value; renderMain(); }
       if (e.target.id === 'fcBal') { const v = e.target.value.trim(), n = toNum(v); if (!(await needVault())) return; await setPayCfg({ balance: v === '' ? null : n, balanceDate: todayISO() }); renderMain(); }
     });
     $('#content').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'fcBal') e.target.blur(); });
