@@ -888,7 +888,7 @@
       '<button type="button" class="nav-item quiet" data-view="done" aria-current="' + (!ui.search && ui.view === 'done') + '"><span class="ico-all">' + I.done + '</span><span class="label">Completed</span></button>' +
       '<button type="button" class="nav-item quiet" data-view="trash" aria-current="' + (!ui.search && ui.view === 'trash') + '"><span class="ico-all">' + I.trash + '</span><span class="label">Recently deleted</span>' + (viewCount('trash') ? '<span class="count">' + viewCount('trash') + '</span>' : '') + '</button></nav>';
     if (newsShown()) h = h.replace('<nav class="nav">', '<nav class="nav has-news">') + '<section class="news" id="newsBox" aria-label="Sidebar boxes">' + newsHtml() + '</section>';
-    h += '<div class="side-foot"><div id="syncLine" class="syncline">' + syncLineHtml() + '</div><div class="row"><button type="button" class="chipbtn" id="settingsBtn" data-menu="settings:">Settings</button><button type="button" class="chipbtn" id="copyBackup">Copy backup</button></div></div>';
+    h += '<div class="side-foot"><div id="syncLine" class="syncline">' + syncLineHtml() + '</div><div class="row"><button type="button" class="chipbtn" id="settingsBtn" data-menu="settings:">Settings</button><button type="button" class="chipbtn" id="copyBackup" title="Save a backup file now">Back up</button></div></div>';
     $('#sideBody').innerHTML = h;
     updateBadge();
     const ne = $('#navEdit'); if (ne) { ne.focus(); ne.select(); }
@@ -1601,7 +1601,7 @@
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
         '<button type="button" data-mact="outlook">' + I.cal + (olOn() ? 'Outlook meetings: shown\u2026' : 'Show my Outlook meetings\u2026') + '</button>' +
         '<button type="button" data-mact="icsimport">' + I.cal + 'Import a calendar file (.ics)\u2026</button>' +
-        (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Automatic backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
+        (newsHost() && !isPhone() ? '<button type="button" data-mact="sidebar">' + I.menu + 'Sidebar boxes (weather, stocks, clocks, news)\u2026</button>' : '') + '<button type="button" data-mact="pages">' + I.menu + 'Pages & swiping\u2026</button><button type="button" data-mact="backups">' + I.restore + 'Backups\u2026</button><button type="button" data-mact="restore">' + I.inbox + 'Restore from a backup\u2026</button>';
     } else if (type === 'task') {
       const t = taskById(id); if (!t) { ui.menu = null; el.hidden = true; return; }
       const md = t.myDay === todayISO();
@@ -1899,8 +1899,12 @@
       if (e.target.closest('#syncSignIn')) { openSignIn(); return; }
       if (e.target.closest('#syncRetry')) { if (syncReady()) refreshPull(); else { const u = sync.user; sync.user = null; onSignedIn(u); } return; }
       if (e.target.closest('#copyBackup')) {
-        const txt = JSON.stringify(S, null, 2);
-        try { navigator.clipboard.writeText(txt).then(() => toast('Backup copied to clipboard'), () => toast('Your browser blocked the clipboard here')); } catch (err) { toast('Your browser blocked the clipboard here'); }
+        (async () => {
+          const dir = folderOK() ? await lbDir() : null;
+          if (!dir) { if (folderOK()) { openBackups(); return; } await downloadBackup(); toast('Backup downloaded'); return; }
+          try { if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('not allowed to use the folder'); await writeToFolder(dir); toast('Backup saved to ' + dir.name); }
+          catch (err) { toast('Couldn’t save: ' + (err.message || err)); }
+        })();
         return;
       }
       const nv = e.target.closest('[data-view]'); if (nv) setView(nv.dataset.view);
@@ -2257,13 +2261,17 @@
       if ((e.target.id === 'sheet' && !ui.sheetLocked) || e.target.closest('[data-close]')) { closeSheet(); return; }
       if (e.target.id === 'rsGo') {
         const msg = $('#rsMsg');
-        try {
-          const data = JSON.parse($('#rsText').value);
-          if (!data || data.version !== 1 || !Array.isArray(data.tasks) || !Array.isArray(data.lists)) throw new Error('shape');
-          snapshot(); S = data; S.settings = Object.assign({ scope: 'all', theme: 'sage', mode: 'system', autoRemind: true }, S.settings);
-          ui.selected = null; ui.view = 'myday'; save(); applyTheme(); render(); closeSheet(); toast('Backup restored: ' + S.tasks.length + ' tasks', true);
-        } catch (err) { msg.textContent = 'That doesn\u2019t look like a Tally backup. Copy it again with \u201cCopy backup\u201d and paste the whole thing.'; }
+        restoreFrom($('#rsText').value).catch(() => { msg.textContent = 'That doesn\u2019t look like a Tally backup. Paste the whole thing.'; });
         return;
+      }
+      if (e.target.id === 'rsFile') {
+        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json'; inp.hidden = true; document.body.appendChild(inp);
+        inp.addEventListener('change', async () => {
+          const f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+          $('#rsFileMsg').textContent = 'Restoring…';
+          try { await restoreFrom(await f.text()); } catch (err) { if ($('#rsFileMsg')) $('#rsFileMsg').textContent = 'That file isn’t a Tally backup.'; }
+        });
+        inp.click(); return;
       }
       const tr = e.target.closest('[data-try]'); if (tr) { closeSheet(); $('#qa').value = tr.dataset.try; updatePreview(); $('#qa').focus(); }
     });
@@ -2364,10 +2372,22 @@
     $('[data-close]', el).focus();
   }
   function closeSheet() { $('#sheet').hidden = true; }
+  // A backup file (or the older pasted text): replaces everything, puts photos and PDFs back on this device
+  async function restoreFrom(text) {
+    const d = JSON.parse(text), data = d && d.tally === 'backup' ? d.data : d;
+    if (!data || data.version !== 1 || !Array.isArray(data.tasks) || !Array.isArray(data.lists)) throw new Error('shape');
+    const files = (d && d.files) || {};
+    for (const k of Object.keys(files)) { try { await fput(k, await (await fetch(files[k])).blob()); } catch (e) { } }
+    snapshot(); S = data; S.trash = S.trash || { tasks: [], lists: [] }; S.groups = S.groups || []; S.settings = Object.assign({ scope: 'all', theme: 'sage', mode: 'system', autoRemind: true }, S.settings);
+    vault.plain = {}; vault.json = {}; vault.sealedAs = {}; if (vault.key) openPlain();
+    ui.selected = null; ui.view = 'myday'; save(); applyTheme(); render(); closeSheet();
+    toast('Backup restored: ' + S.tasks.length + ' item' + (S.tasks.length === 1 ? '' : 's') + (Object.keys(files).length ? ', with photos and files' : ''), true);
+  }
   function openRestore() {
     const el = $('#sheet');
     el.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rsTitle"><div class="sheet-head"><h2 id="rsTitle">Restore from a backup</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
-      '<p>Paste a backup you copied with \u201cCopy backup\u201d. This replaces everything currently in Tally. You can undo right after.</p>' +
+      '<p>This replaces everything currently in Tally with the backup. You can undo right after.</p><div class="row" style="gap:8px;align-items:center"><button type="button" class="chipbtn solid" id="rsFile">Choose the backup file…</button><span class="hint" id="rsFileMsg"></span></div>' +
+      '<h3 style="margin-top:16px">Or paste an older “Copy backup”</h3>' +
       '<textarea class="ctl" id="rsText" rows="10" placeholder="Paste backup here" style="font:12px ui-monospace,Consolas,monospace"></textarea>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-top:10px"><button type="button" class="chipbtn solid" id="rsGo">Restore</button><span class="hint" id="rsMsg"></span></div></div></div>';
     el.hidden = false; $('#rsText').focus();
@@ -3538,11 +3558,76 @@
       return true;
     } catch (e) { return false; }
   }
+  /* ---- backups on this computer: a file each week in a folder you pick (last 13 kept, about 3 months) ---- */
+  // The folder is remembered (IndexedDB). Chrome may ask once per start to allow saving there; picking
+  // "Allow on every visit" makes it fully automatic. Phones (no folder access) download a file instead.
+  const LB = { KEEP: 13, LAST: 'tally.localbackup.last', RX: /^Tally backup (\d{4}-\d\d-\d\d)\.json$/, dir: null, loaded: false };
+  const folderOK = () => typeof window.showDirectoryPicker === 'function' && !isPhone();
+  async function lbDir() { if (!LB.loaded) { LB.loaded = true; try { LB.dir = STORE.off ? null : await dbGet('backupDir'); } catch (e) { } } return LB.dir; }
+  function blobToDataUrl(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
+  // Everything in one file: your data, plus photos and PDFs (as stored; locked ones stay scrambled)
+  async function backupBlob() {
+    const files = {}, atts = [];
+    S.tasks.concat((S.trash && S.trash.tasks) || []).forEach(t => (t.attachments || []).forEach(a => atts.push(a)));
+    for (const a of atts) for (const thumb of [false, true]) {
+      try { const b = await blobFor(a, thumb, true); if (b) files[a.id + (thumb ? '_t' : '')] = await blobToDataUrl(b); } catch (e) { }
+    }
+    return new Blob([JSON.stringify({ tally: 'backup', version: 1, made: new Date().toISOString(), data: S, files })], { type: 'application/json' });
+  }
+  const backupName = () => 'Tally backup ' + todayISO() + '.json';
+  async function downloadBackup() {
+    const b = await backupBlob(), u = URL.createObjectURL(b), a = document.createElement('a');
+    a.href = u; a.download = backupName(); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000);
+    try { localStorage.setItem(LB.LAST, String(Date.now())); } catch (e) { }
+  }
+  async function writeToFolder(dir) {
+    const fh = await dir.getFileHandle(backupName(), { create: true }), w = await fh.createWritable();
+    await w.write(await backupBlob()); await w.close();
+    const old = [];
+    for await (const [name, h] of dir.entries()) if (h.kind === 'file' && LB.RX.test(name)) old.push(name);
+    old.sort().reverse().slice(LB.KEEP).forEach(n => dir.removeEntry(n).catch(() => { }));
+    try { localStorage.setItem(LB.LAST, String(Date.now())); } catch (e) { }
+  }
+  // One click when Chrome wants permission again
+  function lbAsk(dir) {
+    if (document.getElementById('lbAsk')) return;
+    const el = document.createElement('div'); el.id = 'lbAsk'; el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9000;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center;font:14px var(--font-body)';
+    el.innerHTML = '<span>Time for this week’s backup.</span><button type="button" class="chipbtn solid" id="lbGo">Save it</button><button type="button" class="iconbtn" id="lbLater" aria-label="Later">' + I.x + '</button>';
+    document.body.appendChild(el);
+    $('#lbLater').onclick = () => el.remove();
+    $('#lbGo').onclick = async () => {
+      try { if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') { toast('Not saved: Tally wasn’t allowed to use the folder'); return; } await writeToFolder(dir); el.remove(); toast('Backup saved to your folder'); }
+      catch (e) { toast('Couldn’t save the backup: ' + (e.message || e)); }
+    };
+  }
+  async function weeklyLocal(force) {
+    const last = Number(localStorage.getItem(LB.LAST) || 0);
+    if (!force && Date.now() - last < 7 * 86400000) return;
+    const dir = folderOK() && await lbDir(); if (!dir) return;
+    try {
+      const perm = await dir.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') await writeToFolder(dir); else lbAsk(dir);
+    } catch (e) { }
+  }
+  async function pickBackupFolder() {
+    try {
+      const dir = await window.showDirectoryPicker({ id: 'tally-backups', mode: 'readwrite', startIn: 'documents' });
+      LB.dir = dir; LB.loaded = true; await dbPut([['backupDir', dir]]);
+      await writeToFolder(dir); toast('Backup saved. A new one is added every week.'); openBackups();
+    } catch (e) { if (e && e.name !== 'AbortError') toast('Couldn’t use that folder: ' + (e.message || e)); }
+  }
   async function openBackups() {
     const el = $('#sheet');
     const head = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="bkTitle"><div class="sheet-head"><h2 id="bkTitle">Backups</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">';
-    if (!syncReady()) { el.innerHTML = head + '<p>Automatic backups need sync. Turn on sync first; until then use “Copy backup”.</p></div></div>'; el.hidden = false; return; }
-    el.innerHTML = head + '<p>Once a week Tally saves a full copy of your tasks, notes and documents to your private storage. The last 8 are kept. Photos and PDFs aren’t copied again; they stay in storage for 30 days after you delete them, so a restore can still show them.</p><div id="bkList" class="hint">Loading…</div><div style="margin-top:12px"><button type="button" class="chipbtn" id="bkNow">Back up now</button></div></div></div>';
+    const dir = folderOK() ? await lbDir() : null, last = Number(localStorage.getItem(LB.LAST) || 0);
+    const local = '<h3>On this ' + (isPhone() ? 'phone' : 'computer') + '</h3>' + (folderOK()
+      ? (dir ? '<p>Every week Tally saves a backup file, with your photos and PDFs, to the folder <b>' + esc(dir.name) + '</b>. The last ' + LB.KEEP + ' are kept (about 3 months).' + (last ? ' Last one: ' + esc(fmtLong(D.toISO(new Date(last)))) + '.' : '') + '</p><p class="hint">If Chrome asks whether Tally may save to the folder, choose <b>Allow on every visit</b> so it happens on its own.</p><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="chipbtn solid" id="lbNow">Back up now</button><button type="button" class="chipbtn" id="lbPick">Change folder</button></div>'
+        : '<p>Pick a folder (for example a new <b>Tally backups</b> folder in Documents, or in OneDrive). Tally then saves a backup file there every week, photos and PDFs included, and keeps the last ' + LB.KEEP + ' (about 3 months).</p><button type="button" class="chipbtn solid" id="lbPick">Choose a folder…</button>')
+      : '<p>Download a backup file (photos and PDFs included). It goes to your Downloads.</p><button type="button" class="chipbtn solid" id="lbDown">Download backup</button>') +
+      '<p class="hint" style="margin-top:10px">To restore one: Settings → Restore from a backup → Choose the backup file.</p>';
+    if (!syncReady()) { el.innerHTML = head + local + '<h3>Online</h3><p>Online backups need sync. Turn on sync to also get a weekly copy in your private storage.</p></div></div>'; el.hidden = false; return; }
+    el.innerHTML = head + local + '<h3>Online</h3><p>Once a week Tally saves a full copy of your tasks, notes and documents to your private storage. The last 8 are kept. Photos and PDFs aren’t copied again; they stay in storage for 30 days after you delete them, so a restore can still show them.</p><div id="bkList" class="hint">Loading…</div><div style="margin-top:12px"><button type="button" class="chipbtn" id="bkNow">Back up online now</button></div></div></div>';
     el.hidden = false;
     try {
       const files = await listBackups();
@@ -3727,6 +3812,9 @@
       if (e.target.id === 'vGo') vaultSubmit();
       if (e.target.id === 'bkNow') { e.target.disabled = true; e.target.textContent = 'Backing up…'; weeklyBackup(true).then(ok => { toast(ok ? 'Backup saved' : 'Backup didn’t work. Is sync on?'); openBackups(); }); }
       const br = e.target.closest('[data-bkrestore]'); if (br) restoreBackup(br.dataset.bkrestore, br);
+      if (e.target.closest('#lbPick')) pickBackupFolder();
+      if (e.target.closest('#lbDown')) downloadBackup().then(() => toast('Backup downloaded'), err => toast('Couldn’t make the backup: ' + (err.message || err)));
+      if (e.target.closest('#lbNow')) { const b = e.target.closest('#lbNow'); b.disabled = true; b.textContent = 'Saving…'; lbDir().then(async dir => { try { if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('not allowed to use the folder'); await writeToFolder(dir); const a = document.getElementById('lbAsk'); if (a) a.remove(); toast('Backup saved to ' + dir.name); } catch (err) { toast('Couldn’t save: ' + (err.message || err)); } openBackups(); }); }
       if (e.target.closest('#shareNow') && ui.shareReady) { const r = ui.shareReady; ui.shareReady = null; closeSheet(); navigator.share({ files: r.files, title: r.title }).catch(() => { }); }
     });
     $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'vPass' || e.target.id === 'vPass2')) vaultSubmit(); });
@@ -4697,7 +4785,7 @@
     if (ch) { save(); render(); }
     S.tasks.filter(t => isNote(t) && t.due >= todayISO() && !isMeet(t)).forEach(n => { if (commitEvents(n)) ch++; }); // today's and upcoming journal lines with a time go on the calendar
     if (ch) { save(); render(); }
-    autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000);
+    autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000); setTimeout(weeklyLocal, 20000); setInterval(weeklyLocal, 3600000);
   if (/[?&]share=1/.test(location.search)) { history.replaceState(null, '', location.pathname); takeShared(); }
   startSync();
   })(); // end of start-up (waits for the saved data)

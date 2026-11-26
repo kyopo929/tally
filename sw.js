@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION when files change.
-const VERSION = 'tally-v80';
+const VERSION = 'tally-v81';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './vendor/supabase.js', './config.js'];
 const PUSH_LOG = 'tally-push-log'; // reminders already shown by a push, so the app doesn't show them again
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
