@@ -6,9 +6,12 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
   const todayISO = () => D.toISO(new Date());
+  const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments'); // Payments section: original site only (api/_cfg.js)
+  const isPay = t => !!t && t.type === 'payment';
   const COLORS = ['#2856c7', '#2a9d8f', '#d99100', '#c4372c', '#7b4fc9', '#3d8b37', '#d0559a', '#607089'];
 
   const I = {
+    pay: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg>',
     cal: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
@@ -573,7 +576,8 @@
     all: { title: 'All tasks', icon: I.all, cls: 'ico-all' },
     notes: { title: 'Notes', icon: I.notes, cls: 'ico-notes' },
     docs: { title: 'Important Documents', icon: I.idcard, cls: 'ico-docs' },
-    journal: { title: 'Journal', icon: I.journal, cls: 'ico-journal' }
+    journal: { title: 'Journal', icon: I.journal, cls: 'ico-journal' },
+    payments: { title: 'Payments', icon: I.pay, cls: 'ico-pay' }
   };
   function viewCount(v) {
     const o = open();
@@ -581,6 +585,7 @@
     if (v === 'upcoming') return o.filter(t => t.due).length;
     if (v === 'all') return o.length;
     if (v === 'notes' || v === 'docs' || v === 'journal') return '';
+    if (v === 'payments') return vault.key ? pays().filter(x => x.p.status === 'req' || x.p.status === 'ok').length : '';
     if (v === 'trash') return S.trash.tasks.length + S.trash.lists.length;
     return '';
   }
@@ -864,7 +869,7 @@
   function renderSide() {
     let h = '<nav class="nav">';
     const overdue = open().filter(t => t.due && t.due < todayISO()).length;
-    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal']) {
+    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [])) {
       const c = viewCount(v);
       h += '<button type="button" class="nav-item" data-view="' + v + '" aria-current="' + (!ui.search && (ui.view === v || (v === 'notes' && paperView(ui.view)) || (v === 'journal' && ui.view === 'jlink'))) + '"><span class="' + VIEWS[v].cls + '">' + VIEWS[v].icon + '</span><span class="label">' + VIEWS[v].title + '</span>' +
         (c !== '' && c ? '<span class="count' + ((v === 'myday' || v === 'all') && overdue ? ' hot' : '') + '">' + c + '</span>' : '') + '</button>';
@@ -981,7 +986,7 @@
     if (ui.search) {
       const q = ui.search.toLowerCase();
       const tq = q.replace(/^@/, '');
-      const hit = t => !isPaper(t) && t.type !== 'vault' && t.type !== 'page' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
+      const hit = t => !isPaper(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
       const found = sortTasks(S.tasks.filter(t => !t.done && hit(t)));
       const doneFound = S.tasks.filter(t => t.done && hit(t)).sort((a, b) => b.doneAt - a.doneAt);
       title = 'Search'; sub = '\u201c' + ui.search + '\u201d';
@@ -1065,6 +1070,9 @@
       ({ title, sub, html, actions } = renderDocs());
     } else if (v === 'journal') {
       ({ title, sub, html, actions } = renderJournal());
+    } else if (v === 'payments') {
+      if (!PAY_ON) { ui.view = 'myday'; return renderMain(); }
+      ({ title, sub, html, actions } = renderPayments());
     } else if (v === 'jlink') {
       ({ title, sub, html, actions } = renderLinkPage(ui.jlink || ''));
     } else if (v === 'trash') {
@@ -1078,7 +1086,7 @@
           '<button type="button" class="chipbtn" data-restore-list="' + l.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-list="' + l.id + '">Delete forever</button></div>';
       }).join('') + '</div></div>';
       if (tt.length) html += '<div class="section"><div class="section-head">Tasks <span class="n">' + tt.length + '</span></div><div class="tasks">' + tt.map(t =>
-        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isPaper(t) ? noteTitle(t) : unbr(t.title)) + '</div><div class="tmeta"><span>' + (isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
+        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isPay(t) ? 'Payment' + (payOf(t) ? ': ' + payOf(t).payee + ', ' + money(payOf(t).amount) : ' (locked)') : isPaper(t) ? noteTitle(t) : unbr(t.title)) + '</div><div class="tmeta"><span>' + (isPay(t) ? 'Payments' : isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
         '<button type="button" class="chipbtn" data-restore-task="' + t.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-task="' + t.id + '">Delete forever</button></div>').join('') + '</div></div>';
       if (!tl.length && !tt.length) html = empty('Nothing here', 'Deleted tasks and lists wait here for ' + TRASH_DAYS + ' days, in case you change your mind.');
       else actions = '<button type="button" class="chipbtn" data-empty-trash="1">Empty now</button>';
@@ -1122,6 +1130,7 @@
     $('#content').innerHTML = html;
     $('#content').classList.toggle('calview', v === 'calendar' && !ui.search);
     const onNotes = (paperView(v) || v === 'journal' || v === 'jlink') && !ui.search; if (v !== 'docs') ui.docSel = null;
+    document.body.classList.toggle('onpay', v === 'payments' && !ui.search);
     $('#content').classList.toggle('notesview', onNotes); document.body.classList.toggle('onnotes', onNotes);
     if (onNotes) { masonry(); hydrate($('#content')); requestAnimationFrame(() => { if (paperView(ui.view) && !ui.search) { masonry(); } }); }
   }
@@ -2814,6 +2823,187 @@
     delete raw.sealed; delete raw.locked; delete vault.plain[raw.id];
     [].concat(raw.attachments || []).forEach(a => [a.id, a.id + '_t'].forEach(k => encUrls.delete(k)));
     touchNote(raw); save(); render(); uploadPending(); toast('No longer locked');
+  }
+
+
+  /* ---------- Payments (original site only): a private log of payments to approve, pay and chase ----------
+     Each payment is an item with type:'payment'. Everything about it (payee, amount, site…) sits in `body`,
+     which is always locked: scrambled with the passphrase before it's saved or synced. */
+  const PAY_ST = [['req', 'Requested'], ['ok', 'Approved'], ['paid', 'Paid']];
+  const PAY_NAME = Object.fromEntries(PAY_ST);
+  const payOf = t => ((vault.plain[t.id] || {}).body) || null;
+  const pays = () => vault.key ? S.tasks.filter(isPay).map(t => ({ t, p: payOf(t) })).filter(x => x.p) : [];
+  const money = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const toNum = s => { const n = parseFloat(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : NaN; };
+  function payDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : ''); }
+  function xlDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return String(d.getDate()).padStart(2, '0') + '-' + D.MON_SHORT[d.getMonth()] + '-' + String(d.getFullYear()).slice(2); } // like 29-Oct-26, as in the sheet
+  const chaseWhy = p => [p.failed ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
+  const payTabs = [['topay', 'To pay'], ['runs', 'Pay runs'], ['chase', 'Chase'], ['all', 'All']];
+  function payFilter(tab, all) {
+    if (tab === 'topay') return all.filter(x => x.p.status === 'req' || x.p.status === 'ok');
+    if (tab === 'chase') return all.filter(x => chaseWhy(x.p).length);
+    return all;
+  }
+  async function addPayment(fields) {
+    const t = newTask({ type: 'payment', locked: true });
+    const p = { body: Object.assign({ date: todayISO(), payee: '', site: '', what: '', amount: 0, dir: 'out', status: 'req', receipt: 'yes', ref: '', run: '', failed: false, chase: '', note: '' }, fields) };
+    const j = JSON.stringify(p); t.sealed = await encStr(j); vault.plain[t.id] = p; vault.json[t.id] = j; vault.sealedAs[t.id] = t.sealed;
+    return t;
+  }
+  function payRow(x, opts) {
+    const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
+    const sub = [p.site, p.what].filter(Boolean).map(esc).join(' · ');
+    const nextSt = { req: 'ok', ok: 'paid' }[p.status];
+    return '<div class="prow' + (sel ? ' on' : '') + (p.failed ? ' bad' : '') + '">' +
+      '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select for copying">' +
+      '<span class="pdate">' + esc(payDate(p.date)) + '</span>' +
+      '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
+      ((opts && opts.why && why.length) || (!opts && why.length) ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
+      '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
+      '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
+  }
+  const payTotal = xs => xs.reduce((s, x) => s + (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0), 0);
+  function renderPayments() {
+    const title = 'Payments';
+    if (!vault.key) return { title, sub: 'Locked', actions: '', html: '<div class="empty"><strong>Payments are locked</strong>They’re scrambled with your passphrase, so only you can read them.<div style="margin-top:14px"><button type="button" class="chipbtn solid" data-payunlock="1">' + I.lock + (vaultItem() ? 'Unlock' : 'Choose a passphrase') + '</button></div></div>' };
+    const all = pays().sort((a, b) => (b.p.date || '').localeCompare(a.p.date || '') || (b.t.createdAt - a.t.createdAt));
+    const tab = ui.payTab || 'topay'; if (!ui.paySel) ui.paySel = new Set();
+    const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
+    let html = '<div class="ntabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
+    html += '<div class="pbar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payrun="">' + I.plus + 'Pay run</button><span class="spacer"></span>' +
+      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
+      (tab !== 'runs' ? '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Name, Site, Description, In, Out, Balance, Notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button>' : '') + '</div>';
+    if (tab === 'runs') {
+      const runs = new Map(); all.filter(x => x.p.run).forEach(x => { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); });
+      if (!runs.size) html += empty('No pay runs yet', 'Click “+ Pay run” and paste the names and amounts from Excel. Next time, open the run and click Repeat.');
+      runs.forEach((xs, name) => {
+        const open = ui.payOpen === name, paid = xs.filter(x => x.p.status === 'paid').length, bad = xs.filter(x => x.p.failed).length;
+        html += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(name) + '">' + I.chev + '<span class="pwho">' + esc(name) + '</span><span class="psub">' + esc(payDate(xs[0].p.date)) + ' · ' + xs.length + ' people · ' + paid + ' paid' + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(xs)) + '</span></button>' +
+          (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(name) + '">Copy for Excel</button><button type="button" class="chipbtn" data-payrun="' + esc(name) + '">Repeat…</button></div><div class="plist">' + xs.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
+      });
+    } else {
+      let xs = payFilter(tab, all);
+      if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, site, description or amount" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.ref, x.p.run, x.p.note, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
+      if (xs.length) html += '<div class="plist">' + xs.map(x => payRow(x, tab === 'chase' || tab === 'all' ? { why: true } : null)).join('') + '</div><div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · total AED ' + money(payTotal(xs)) + '</div>';
+      else html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests and approved payments show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “+ Payment” to add one.' }[tab]);
+    }
+    const toPay = payFilter('topay', all);
+    return { title, sub: toPay.length ? toPay.length + ' to pay · AED ' + money(payTotal(toPay)) : 'All paid', html, actions: lockBtn() };
+  }
+  // Copy for Excel: the sheet's own columns, in order: Date, Name, Site, Description, In, Out, Balance, Notes.
+  // Balance is a formula that works on whatever row it's pasted into: the row above + In - Out.
+  const XL_BAL = '=INDIRECT("R[-1]C",FALSE)+N(INDIRECT("RC[-2]",FALSE))-N(INDIRECT("RC[-1]",FALSE))';
+  function payXlRow(p) {
+    const notes = chaseWhy(p).concat(p.note ? [p.note] : []).join('; ');
+    return [xlDate(p.date), p.payee, p.site, p.what, p.dir === 'in' ? p.amount : '', p.dir === 'in' ? '' : p.amount, XL_BAL, notes].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
+  }
+  function payCopy(xs) {
+    const rows = xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || (a.t.createdAt - b.t.createdAt)).map(x => payXlRow(x.p));
+    const txt = rows.join('\r\n');
+    const done = () => toast(rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' copied. In Excel, click the Date cell of the first empty row and press Ctrl+V.');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, () => toast('Couldn’t copy. Try again.')); else toast('Copying isn’t available here.');
+  }
+  const siteList = () => [...new Set(pays().map(x => x.p.site).filter(Boolean))].sort();
+  function openPayForm(id) {
+    const raw = id && taskById(id), p = raw ? payOf(raw) : { date: todayISO(), payee: '', site: '', what: '', amount: '', dir: 'out', status: 'req', receipt: 'yes', ref: '', run: '', failed: false, chase: '', note: '' };
+    if (!p) return;
+    const opt = (list, v) => list.map(([k, l]) => '<option value="' + k + '"' + (v === k ? ' selected' : '') + '>' + l + '</option>').join('');
+    const f = (key, label, inner) => '<div class="field"><label for="pf_' + key + '">' + label + '</label>' + inner + '</div>';
+    const inp = (key, label, attrs) => f(key, label, '<input class="ctl" id="pf_' + key + '" value="' + esc(p[key] == null ? '' : p[key]) + '" ' + (attrs || '') + '>');
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="pfTitle"><div class="sheet-head"><h2 id="pfTitle">' + (raw ? 'Payment' : 'New payment') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body pform" data-payid="' + (raw ? raw.id : '') + '">' +
+      '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
+      '<div class="pgrid">' + inp('payee', 'Paid to', 'autocomplete="off"') + inp('amount', 'Amount (AED)', 'inputmode="decimal" autocomplete="off"') +
+      f('date', 'Date', '<input class="ctl" type="date" id="pf_date" value="' + esc(p.date || '') + '">') + f('dir', 'Money', '<select class="ctl" id="pf_dir">' + opt([['out', 'Going out'], ['in', 'Coming in']], p.dir) + '</select>') +
+      inp('site', 'Site', 'list="pfSites" autocomplete="off" placeholder="e.g. Head office"') + inp('what', 'Description', 'autocomplete="off" placeholder="October 11 to 24"') +
+      f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') +
+      inp('ref', 'Bank reference or cheque no.', 'autocomplete="off"') + inp('run', 'Pay run', 'autocomplete="off" placeholder="Leave empty if not part of a run"') + '</div>' +
+      '<label class="pcheck"><input type="checkbox" id="pf_failed"' + (p.failed ? ' checked' : '') + '> The transfer didn’t go through</label>' +
+      inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paid short by one day, top up 296.70"') +
+      f('note', 'Note', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
+      '<div class="pform-acts"><button type="button" class="chipbtn solid" data-paysave="1">Save</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="pfMsg"></span><span class="spacer"></span>' + (raw ? '<button type="button" class="danger-btn" data-paydel="' + raw.id + '">Delete</button>' : '') + '</div></div></div>';
+    $('#sheet').hidden = false; setTimeout(() => $('#pf_payee') && $('#pf_payee').focus(), 30);
+  }
+  async function savePayForm() {
+    const form = $('.pform'); if (!form) return;
+    const v = k => $('#pf_' + k).value.trim(), amt = toNum(v('amount'));
+    if (!v('payee')) { $('#pfMsg').textContent = 'Who was it paid to?'; return; }
+    if (!isFinite(amt) || amt <= 0) { $('#pfMsg').textContent = 'Type the amount, like 1500.00'; return; }
+    if (!vault.key && !(await needVault())) return;
+    const fields = { date: v('date') || todayISO(), payee: v('payee'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), ref: v('ref'), run: v('run'), failed: $('#pf_failed').checked, chase: v('chase'), note: v('note') };
+    snapshot();
+    const raw = form.dataset.payid && taskById(form.dataset.payid);
+    if (raw) Object.assign(payOf(raw), fields); else await addPayment(fields);
+    save(); closeSheet(); render(); toast(raw ? 'Payment saved' : 'Payment added', true);
+  }
+  // Paste from Excel: one person per line. Name first, amount = the last number on the line, site = a cell in between (optional).
+  function parseRunLines(text, site) {
+    return String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+      const cells = l.split(/\t|\s{2,}|,(?=\s*[A-Za-z])|;/).map(c => c.trim()).filter(Boolean);
+      let ai = -1; for (let i = cells.length - 1; i > 0; i--) if (/^-?[\d,]+(\.\d+)?$/.test(cells[i].replace(/^AED\s*/i, ''))) { ai = i; break; }
+      if (ai < 0) return { bad: l };
+      const mid = cells.slice(1, ai).filter(c => !/^-?[\d,]+(\.\d+)?$/.test(c));
+      return { payee: cells[0], amount: toNum(cells[ai]), site: mid[0] || site || '' };
+    });
+  }
+  function openRunForm(from) {
+    const src = from ? pays().filter(x => x.p.run === from) : [];
+    const lines = src.map(x => x.p.payee + '\t' + x.p.site + '\t' + x.p.amount).join('\n');
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="prTitle"><div class="sheet-head"><h2 id="prTitle">' + (from ? 'Repeat pay run' : 'New pay run') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
+      (from ? '<p>Copied from “' + esc(from) + '”. Change the name and date, and fix any amounts.</p>' : '<p>Paste from Excel: copy the Name, Site and Amount columns, then paste below. One person per line.</p>') +
+      '<div class="pgrid"><div class="field"><label for="pr_name">Name of the run</label><input class="ctl" id="pr_name" placeholder="October 25 to November 7" autocomplete="off"></div><div class="field"><label for="pr_date">Date</label><input class="ctl" type="date" id="pr_date" value="' + todayISO() + '"></div></div>' +
+      '<div class="field"><label for="pr_lines">People and amounts</label><textarea class="ctl" id="pr_lines" rows="10" placeholder="Jane Doe\tHead office\t1500.00">' + esc(lines) + '</textarea></div>' +
+      '<p class="hint" id="prSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payrunsave="1">Add to To pay</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="prMsg"></span></div></div></div>';
+    $('#sheet').hidden = false; runSum(); setTimeout(() => $('#pr_name') && $('#pr_name').focus(), 30);
+  }
+  function runSum() {
+    const el = $('#prSum'); if (!el) return;
+    const rows = parseRunLines($('#pr_lines').value), ok = rows.filter(r => !r.bad), bad = rows.filter(r => r.bad);
+    el.innerHTML = ok.length ? ok.length + ' people · total AED ' + money(ok.reduce((s, r) => s + r.amount, 0)) + (bad.length ? ' · <b class="badtxt">' + bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' without an amount: ' + bad.map(b => esc(b.bad)).join(', ') + '</b>' : '') : '';
+  }
+  async function saveRunForm() {
+    const name = $('#pr_name').value.trim(), date = $('#pr_date').value || todayISO(), rows = parseRunLines($('#pr_lines').value);
+    if (!name) { $('#prMsg').textContent = 'Give the run a name, like the pay period.'; return; }
+    if (pays().some(x => x.p.run === name)) { $('#prMsg').textContent = 'There’s already a run with that name.'; return; }
+    if (!rows.length || rows.some(r => r.bad)) { $('#prMsg').textContent = rows.length ? 'Fix the lines without an amount first.' : 'Paste at least one person.'; return; }
+    if (!vault.key && !(await needVault())) return;
+    snapshot();
+    for (const r of rows) await addPayment({ date, payee: r.payee, site: r.site, what: name, amount: r.amount, run: name });
+    save(); closeSheet(); ui.payTab = 'runs'; ui.payOpen = name; render(); toast(rows.length + ' payments added', true);
+  }
+  function bindPay() {
+    if (!PAY_ON) return;
+    const go = () => needVault().then(ok => { if (ok) render(); });
+    $('#content').addEventListener('click', e => {
+      if (ui.view !== 'payments') return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payrun],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall]'); if (!b) return;
+      const d = b.dataset;
+      if (d.payunlock) return go();
+      if (!vault.key) return go();
+      if (d.paytab) { ui.payTab = d.paytab; ui.paySel = new Set(); renderMain(); return; }
+      if (d.paynew) return openPayForm(null);
+      if (d.payrun !== undefined) return openRunForm(d.payrun || null);
+      if (d.payedit) return openPayForm(d.payedit);
+      if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
+      if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
+      if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
+      const set = (xs, st) => { snapshot(); xs.forEach(x => { x.p.status = st; if (st === 'paid') x.p.failed = false; }); save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
+      if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], { req: 'ok', ok: 'paid' }[p.status]); return; }
+      if (d.paystatus) { set(pays().filter(x => ui.paySel.has(x.t.id)), d.paystatus); ui.paySel = new Set(); renderMain(); return; }
+      if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && x.p.status !== 'paid' && (d.to !== 'ok' || x.p.status === 'req')), d.to); return; }
+      if (d.paycopy) { const all = pays(); payCopy(d.paycopy === 'sel' ? all.filter(x => ui.paySel.has(x.t.id)) : d.paycopy === 'run' ? all.filter(x => x.p.run === d.name) : payFilter(d.paycopy, all)); return; }
+    });
+    $('#content').addEventListener('input', e => { if (e.target.id === 'payFind') { ui.payFind = e.target.value; const pos = e.target.selectionStart; renderMain(); const f = $('#payFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
+    $('#sheet').addEventListener('click', e => {
+      if (e.target.closest('[data-paysave]')) { savePayForm(); return; }
+      if (e.target.closest('[data-payrunsave]')) { saveRunForm(); return; }
+      const del = e.target.closest('[data-paydel]');
+      if (del) {
+        if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Click again to delete'; return; }
+        const t = taskById(del.dataset.paydel); if (t) { snapshot(); trashTask(t); save(); } closeSheet(); render(); toast('Payment moved to Recently deleted', true);
+      }
+    });
+    $('#sheet').addEventListener('input', e => { if (e.target.id === 'pr_lines') runSum(); });
+    $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.pform input')) { e.preventDefault(); savePayForm(); } });
   }
 
   // ---- local file store (IndexedDB): originals + previews; synced to Supabase Storage when signed in
@@ -4770,7 +4960,7 @@
   });
   setTimeout(() => refreshOutlook(), 1500); setInterval(() => refreshOutlook(), 30 * 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOutlook(); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); bindPay(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }

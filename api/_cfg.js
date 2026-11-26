@@ -9,6 +9,11 @@ function holidaysFor(req) {
   if (process.env.HOLIDAYS) return process.env.HOLIDAYS.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   return isOriginal(req) ? ['ae', 'us', 'kr'] : ['ae', 'us'];
 }
+// Extra sections only the original site shows: FEATURES="payments" turns one on for a copy. Default: the original gets payments, copies get none.
+function featuresFor(req) {
+  if (process.env.FEATURES !== undefined) return process.env.FEATURES.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  return isOriginal(req) ? ['payments'] : [];
+}
 function isOriginal(req) {
   const host = String((req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '').toLowerCase();
   return host === ORIGINAL_HOST || process.env.VERCEL_PROJECT_PRODUCTION_URL === ORIGINAL_HOST;
@@ -23,4 +28,4 @@ function supabaseFor(req) {
   if (isOriginal(req)) return ORIGINAL;
   return { url: '', key: '' };
 }
-module.exports = { supabaseFor, holidaysFor, isOriginal };
+module.exports = { supabaseFor, holidaysFor, featuresFor, isOriginal };

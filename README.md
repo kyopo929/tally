@@ -47,3 +47,9 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 - Locked items: `locked:true`, `sealed` = AES-GCM(JSON {body, items, number, texts}) with a PBKDF2 key from the passphrase; the `vault` row holds salt + check. Locked files are stored and uploaded encrypted (`enc:true`). Auto-locks after 10 min idle / 5 min hidden.
 - Weekly backup: `attachments/<uid>/backups/YYYY-MM-DD.json`, last 8 kept (Settings → Automatic backups). Unreferenced files are removed from Storage after 30 days.
 - Android share sheet: manifest `share_target` → POST `/share-in` handled by sw.js (cache `tally-share`) → app opens `?share=1` and makes a note.
+
+## Payments (original site only)
+- Shown only where `/config.js` lists `features: ['payments']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=payments` in Vercel.
+- Each payment is an item with `type:'payment'`, always locked: payee, amount, site, status etc. live in `body`, sealed with the locked-items passphrase before saving or syncing. The view asks to unlock first.
+- Status: Requested → Approved → Paid. Tabs: To pay (Requested + Approved), Pay runs, Chase (didn't go through, missing receipt, follow-up note), All (with a filter).
+- Pay run: paste Name / Site / Amount lines from Excel; Repeat copies a run for the next period. Copy for Excel puts the sheet's columns on the clipboard: Date (like 29-Oct-26), Name, Site, Description, In, Out, Balance (a formula: row above + In - Out, works on any row), Notes.
