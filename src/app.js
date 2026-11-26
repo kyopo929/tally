@@ -2918,7 +2918,7 @@
 
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
-    const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
+    const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ') + (payRepeats(x.t.id) ? ' <span class="ptag">↻ ' + esc(payRepeats(x.t.id)) + '</span>' : '');
     return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + (opts && opts.drag ? ' pdrag" draggable="true" data-pdrag="' + x.t.id + '" title="Drag to change the order' : opts && opts.rdrag ? ' pdrag" draggable="true" data-rdrag="' + esc(p.payee) + '" title="Drag to change the payroll order (saved in the roster)' : '') + '">' + (opts && (opts.drag || opts.rdrag) ? '<span class="pgrip" aria-hidden="true">⋮⋮</span>' : '') +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
       '<span class="pdate' + (isPaid(p) ? '' : isSched(p) ? ' sched' : ' pend') + '">' + (isPaid(p) || isSched(p) ? esc(payDate(p.date)) : 'Pending') + '</span>' +
@@ -2957,6 +2957,7 @@
     if (/^\d{4}(-\d{2}){0,2}$/.test(q)) return xs.filter(x => (x.p.date || '').startsWith(q));
     return xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.check, x.p.run, x.p.note, x.p.chase, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q));
   }
+  const payRepeats = id => { const r = payCfg().recurring.find(r => r.src === id); return r ? EVERY_NAME[r.every] : ''; };
   const payTotal = xs => xs.reduce((s, x) => s + (x.p.status === 'paid' && (x.p.failed || x.p.twice) ? 0 : (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0)), 0); // a failed transfer or a row in both columns moved no money
   // Payrolls, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date), two (a 2-week payroll) }
   function payRuns(all) {
@@ -2992,7 +2993,7 @@
     const tab = ui.payTab || 'all'; if (!ui.paySel) ui.paySel = new Set();
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
     let html = '<div class="ntabs ptabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
-    const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button>' + (extra || '') + '<span class="spacer"></span>' +
+    const bar = extra => '<div class="paybar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button><button type="button" class="chipbtn" data-bankcheck="1">Check bank statement</button>' + (extra || '') + '<span class="spacer"></span>' +
       (ui.paySel.size ? '<span class="psel">' + selTotal() + '</span><button type="button" class="chipbtn" data-paystatus="req">Mark pending</button><button type="button" class="danger-btn" data-paydelsel="1">Delete</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
       '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button></div>';
     const selOnly = ui.paySel.size ? '<div class="paybar"><span class="psel">' + selTotal() + '</span><span class="spacer"></span><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paycopy="sel">Copy for Excel</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button></div>' : '';
@@ -3006,9 +3007,9 @@
       const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
       if (tab === 'topay') { // group a payroll's lines into one row
         const runs = new Map(), loose = []; xs.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } else loose.push(x); });
-        runs.forEach((rs, name) => { html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>' +
+        [...runs].sort((a, b) => (b[1].every(x => isSched(x.p)) - a[1].every(x => isSched(x.p)))).forEach(([name, rs]) => { // scheduled payrolls first html += '<div class="pnext"><div><b>Payroll ' + esc(name) + '</b><span class="psub">' + rs.length + ' people · AED ' + money(payTotal(rs)) + ' · ' + (rs.every(x => isSched(x.p)) ? '<b class="schedtxt">scheduled for ' + esc(payDate(rs[0].p.date)) + '</b>' : 'pay date ' + esc(payDate(rs[0].p.date))) + '</span></div><button type="button" class="chipbtn" data-paybasket="' + esc(name) + '">Edit basket</button>' + (rs.every(x => isSched(x.p)) ? '' : '<button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="sched">Schedule for ' + esc(payDate(rs[0].p.date)) + '</button>') + '<button type="button" class="chipbtn solid" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button></div>' +
           '<div class="plist prunlines">' + payOrder(rs).map(x => payRow(x, { why: true, rdrag: true })).join('') + '</div>'; });
-        xs = loose.slice().sort((a, b) => (a.p.order ?? 1e9) - (b.p.order ?? 1e9) || (b.p.date || '').localeCompare(a.p.date || '')); // your dragged order; new ones after, newest first
+        xs = loose.slice().sort((a, b) => (isSched(b.p) - isSched(a.p)) || (isSched(a.p) ? (a.p.date || '').localeCompare(b.p.date || '') : 0) || (a.p.order ?? 1e9) - (b.p.order ?? 1e9) || (b.p.date || '').localeCompare(a.p.date || '')); // your dragged order; new ones after, newest first
       }
       ui.payShown = xs.map(x => x.t.id);
       if (xs.length) html += '<div class="pselall"><label><input type="checkbox" data-payselall="1"' + (xs.every(x => ui.paySel.has(x.t.id)) ? ' checked' : '') + '> Select all ' + xs.length + '</label></div><div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true, drag: tab === 'topay' })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
@@ -3020,28 +3021,32 @@
 
   /* ---- Sheet: every payment as an editable spreadsheet, in the cash-flow sheet's columns ---- */
   const netOf = p => p.failed || p.twice ? 0 : (p.dir === 'in' ? 1 : -1) * (Number(p.amount) || 0);
-  function sheetRowHtml(x, bal) {
+  function sheetRowHtml(x, bal, proj) {
     const p = x.p, dep = p.dir === 'in' || p.failed || p.twice ? money(p.amount) : '', chk = p.dir === 'in' ? '' : money(p.amount);
     const cell = (k, v, cls, attrs) => '<td><input class="ctl s-' + k + (cls ? ' ' + cls : '') + '" value="' + esc(v == null ? '' : v) + '"' + (attrs || '') + '></td>';
-    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + '">' + (isPaid(p) || isSched(p) ? cell('date', p.date || '', isSched(p) ? 'sched' : '', ' type="date"') : '<td class="spend">Pending</td>') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
+    return '<tr data-sid="' + x.t.id + '" class="' + (p.failed && !p.redone ? 'bad' : '') + (proj ? ' proj' : '') + '"' + (!isPaid(p) && !isSched(p) ? ' draggable="true" data-pdrag="' + x.t.id + '"' : '') + '>' + (isPaid(p) || isSched(p) ? cell('date', p.date || '', isSched(p) ? 'sched' : '', ' type="date"') : '<td class="spend" title="Drag to reorder"><span class="pgrip">⋮⋮</span> Pending</td>') + cell('payee', p.payee) + cell('check', p.check, 'sm') + cell('site', p.site, 'sm', ' list="pfSites"') + cell('what', p.what, 'wide') +
       cell('dep', dep, 'r', ' inputmode="decimal"') + cell('chk', chk, 'r', ' inputmode="decimal"') + '<td class="r sbal' + (bal < 0 ? ' neg' : '') + '">' + (bal == null ? '' : money(bal)) + '</td>' + cell('note', p.note) +
       '<td><select class="ctl s-status sm">' + PAY_ST.map(([k, l]) => '<option value="' + k + '"' + ((isPaid(p) ? 'paid' : isSched(p) ? 'sched' : 'req') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
       '<td><button type="button" class="iconbtn" data-sdel="' + x.t.id + '" aria-label="Delete row" title="Delete row">' + I.x + '</button></td></tr>';
   }
   function renderSheet(all) {
-    const cfg = payCfg(), paid = payOrder(all.filter(x => x.p.status === 'paid')), open = payOrder(all.filter(x => x.p.status !== 'paid'));
+    const cfg = payCfg(), paid = payOrder(all.filter(x => isPaid(x.p))).sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '')); // paid: by date (payroll in roster order within a day)
+    const po = payOrder(all.filter(x => !isPaid(x.p))), pi = new Map(po.map((x, i) => [x.t.id, i]));
+    const open = po.filter(x => isSched(x.p)).sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || pi.get(a.t.id) - pi.get(b.t.id))
+      .concat(po.filter(x => !isSched(x.p)).sort((a, b) => (a.p.order ?? 1e9) - (b.p.order ?? 1e9) || pi.get(a.t.id) - pi.get(b.t.id))); // scheduled (by date), then pending in your order
     // Balance works back from the bank balance you entered (Forecast tab): the last paid row shows that balance
     const bal = new Map(); if (cfg.balance != null) {
       const asOf = cfg.balanceDate || todayISO(); let k = paid.length - 1; while (k >= 0 && (paid[k].p.date || '') > asOf) k--; // the last payment the entered balance includes
       let b = Number(cfg.balance); for (let i = k; i >= 0; i--) { bal.set(paid[i].t.id, b); b -= netOf(paid[i].p); }
-      b = Number(cfg.balance); for (let i = k + 1; i < paid.length; i++) { b += netOf(paid[i].p); bal.set(paid[i].t.id, b); } }
+      b = Number(cfg.balance); for (let i = k + 1; i < paid.length; i++) { b += netOf(paid[i].p); bal.set(paid[i].t.id, b); }
+      open.forEach(x => { b += (x.p.dir === 'in' ? 1 : -1) * (Number(x.p.amount) || 0); bal.set(x.t.id, b); }); } // then on through scheduled and pending: can we afford them?
     const fp = payFind(paid), fo = payFind(open), lim = ui.sheetLimit || 150, shown = fp.slice(-lim);
     const head = '<thead><tr><th>Date</th><th>Vendor/Customer</th><th>Check #</th><th>Project</th><th>Description/Invoice #</th><th class="r">Deposit</th><th class="r">Check</th><th class="r">Balance</th><th>Notes</th><th>Status</th><th></th></tr></thead>';
     let h = '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount, or a date like 2026-11" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">' +
       '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
       (fp.length > shown.length ? '<div class="more-wrap"><button type="button" class="chipbtn" data-sheetmore="1">Show ' + Math.min(300, fp.length - shown.length) + ' older rows</button></div>' : '') +
       '<div class="pscroll sheetwrap"><table class="btable sheet">' + head + '<tbody>' + shown.map(x => sheetRowHtml(x, bal.get(x.t.id))).join('') + '</tbody>' +
-      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Pending and scheduled (' + fo.length + ') · not in the balance yet</td></tr>' + fo.map(x => sheetRowHtml(x, null)).join('') + '</tbody>' : '') + '</table></div>' +
+      (fo.length ? '<tbody class="sopen"><tr><td colspan="11" class="ssec">Scheduled and pending (' + fo.length + ') · balance shows what’s left after each · drag pending rows to reorder</td></tr>' + fo.map(x => sheetRowHtml(x, bal.get(x.t.id), true)).join('') + '</tbody>' : '') + '</table></div>' +
       '<div class="paybar"><button type="button" class="chipbtn" data-sadd="paid">' + I.plus + 'Row (paid)</button><button type="button" class="chipbtn" data-sadd="req">' + I.plus + 'Row (pending)</button><span class="spacer"></span><span class="hint">' + (cfg.balance == null ? 'Enter your bank balance in the Forecast tab to fill the Balance column.' : 'Balance ends at your bank balance of ' + money(cfg.balance) + ' (entered ' + esc(payDate(cfg.balanceDate)) + '). Enter moves down, like Excel.') + '</span></div>';
     return h;
   }
@@ -3280,9 +3285,49 @@
     // month-end staff
     if (T.moPay) for (let m = 0; m <= months; m++) { const d = lastOfMonth(D.addMonths(new Date(today.getFullYear(), today.getMonth(), 1), m)); if (!runs.some(r => r.name === monthEndName(d))) add(d, 'Month-end pay (' + T.mo.length + ')', -T.moPay, 'mo'); }
     // repeating payments and money coming in
-    cfg.recurring.forEach(r => { if (!r.next || !(r.amount > 0)) return; let d = D.fromISO(r.next); const until = r.until ? D.fromISO(r.until) : null; for (let n = 0; n < 400 && d <= endD && (!until || d <= until); n++) { add(d, r.name, (r.dir === 'in' ? 1 : -1) * r.amount, r.dir === 'in' ? 'in' : 'other'); if (r.every === 'once') break; d = stepDate(d, r.every); } });
+    cfg.recurring.forEach(r => { if (!r.next || !(r.amount > 0)) return; let d = D.fromISO(r.next); const until = r.until ? D.fromISO(r.until) : null; const amt = d => r.from && r.amount2 > 0 && D.toISO(d) >= r.from ? r.amount2 : r.amount; /* new amount from the change date on */ for (let n = 0; n < 400 && d <= endD && (!until || d <= until); n++) { add(d, r.name, (r.dir === 'in' ? 1 : -1) * amt(d), r.dir === 'in' ? 'in' : 'other'); if (r.every === 'once') break; d = stepDate(d, r.every); } });
     return ev.sort((a, b) => a.d - b.d);
   }
+  function fcRegular() {
+    const n = findRecurring().length;
+    return n ? '<div class="pnext"><div><b>' + n + ' payment' + (n === 1 ? '' : 's') + ' in your history look' + (n === 1 ? 's' : '') + ' regular</b><span class="psub">Add them to the forecast, or dismiss them so they’re not suggested again</span></div><button type="button" class="chipbtn solid" data-recfind="1">Review</button></div>' : '';
+  }
+  // Dashboard: money out (by kind) and in per month, then the month-end balance: two charts, one scale each
+  function fcCharts(rows, bal, rate) {
+    if (!rows.length) return '';
+    const W = 720, H = 220, L = 64, R = 12, T = 12, B = 28, cw = (W - L - R) / rows.length, bw = Math.min(26, cw * 0.32);
+    const nice = v => { if (v <= 0) return 1; const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+    const k = v => Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : Math.abs(v) >= 1e3 ? Math.round(v / 1e3) + 'k' : String(Math.round(v));
+    const mon = r => D.MON_SHORT[r.ms.getMonth()] + (r.ms.getMonth() === 0 ? ' ’' + String(r.ms.getFullYear()).slice(2) : '');
+    const tip = r => esc(monthName(r.ms)) + '|Payroll ' + money0(-r.pay) + '|Month-end ' + money0(-r.mo) + '|Other ' + money0(-r.other) + '|Money in ' + money0(r.inn) + '|Net ' + money0(r.net) + (bal == null ? '' : '|Balance ' + money0(r.end) + ' ($' + money0(r.end / rate) + ')');
+    // chart 1: stacked money out next to money in
+    const top = nice(Math.max(1, ...rows.map(r => Math.max(-(r.pay + r.mo + r.other), r.inn)))), y = v => T + (H - T - B) * (1 - v / top);
+    let a = '<svg class="fcsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Money out and in by month">';
+    for (let i = 0; i <= 4; i++) { const v = top * i / 4; a += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + k(v) + '</text>'; }
+    rows.forEach((r, i) => {
+      const cx = L + cw * i + cw / 2, x1 = cx - bw - 1, x2 = cx + 1; let base = 0;
+      [['pay', -r.pay], ['mo', -r.mo], ['other', -r.other]].forEach(([c, v], j, arr) => { if (v <= 0) return; const h = y(base) - y(base + v), last = arr.slice(j + 1).every(([, w]) => w <= 0); a += '<path class="s-' + c + '" d="' + barPath(x1, y(base + v) + (base ? 1 : 0), bw, Math.max(0, h - (base ? 1 : 0)), last) + '"/>'; base += v; });
+      if (r.inn > 0) a += '<path class="s-in" d="' + barPath(x2, y(r.inn), bw, y(0) - y(r.inn), true) + '"/>';
+      a += (rows.length <= 12 || i % 2 === 0 ? '<text class="ax" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + mon(r) + '</text>' : '') + '<rect class="fchit" x="' + (L + cw * i) + '" y="' + T + '" width="' + cw + '" height="' + (H - T - B) + '" data-tip="' + tip(r) + '"/>';
+    });
+    a += '<line class="base" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0) + '" y2="' + y(0) + '"/></svg>';
+    const legend = '<div class="fclegend"><span><i class="s-pay"></i>Payroll</span><span><i class="s-mo"></i>Month-end</span><span><i class="s-other"></i>Other payments</span><span><i class="s-in"></i>Money in</span></div>';
+    let h = '<div class="fcdash"><div class="fccard"><h4>Money out and in, by month (AED)</h4>' + legend + a + '</div>';
+    // chart 2: balance at month end
+    if (bal != null) {
+      const vals = rows.map(r => r.end).concat([bal]), lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), st = nice((hi - lo) / 4 || 1), y0 = Math.floor(lo / st) * st, y1 = Math.ceil(hi / st) * st, yy = v => T + (H - T - B) * (1 - (v - y0) / (y1 - y0 || 1));
+      let b = '<svg class="fcsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bank balance at the end of each month">';
+      for (let v = y0; v <= y1 + 1e-6; v += st) b += '<line class="' + (Math.abs(v) < 1e-6 ? 'base' : 'grid') + '" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy(v) + '" y2="' + yy(v) + '"/><text class="ax" x="' + (L - 6) + '" y="' + (yy(v) + 4) + '" text-anchor="end">' + k(v) + '</text>';
+      const pts = rows.map((r, i) => [L + cw * i + cw / 2, yy(r.end)]);
+      b += '<polyline class="bal" points="' + pts.map(q => q.join(',')).join(' ') + '"/>' + pts.map((q, i) => '<circle class="balpt" cx="' + q[0] + '" cy="' + q[1] + '" r="4"/>').join('');
+      rows.forEach((r, i) => { b += (rows.length <= 12 || i % 2 === 0 ? '<text class="ax" x="' + pts[i][0] + '" y="' + (H - 8) + '" text-anchor="middle">' + mon(r) + '</text>' : '') + '<rect class="fchit" x="' + (L + cw * i) + '" y="' + T + '" width="' + cw + '" height="' + (H - T - B) + '" data-tip="' + tip(r) + '"/>'; });
+      const last = rows[rows.length - 1]; b += '<text class="lbl" x="' + (pts[pts.length - 1][0] - 6) + '" y="' + (pts[pts.length - 1][1] - 10) + '" text-anchor="end">' + k(last.end) + '</text></svg>';
+      h += '<div class="fccard"><h4>Bank balance at the end of each month (AED)</h4>' + b + '</div>';
+    }
+    return h + '<div class="fctip" hidden></div></div>';
+  }
+  // A bar with rounded top corners (only the top segment of a stack is rounded)
+  function barPath(x, y, w, h, round) { if (h <= 0) return ''; const r = round ? Math.min(4, w / 2, h) : 0; return 'M' + x + ',' + (y + h) + 'V' + (y + r) + (r ? 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y : '') + 'H' + (x + w - r) + (r ? 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) : '') + 'V' + (y + h) + 'Z'; }
   function renderForecast(all) {
     const cfg = payCfg(), rate = cfg.rate || 3.67, months = ui.fcMonths || 12, ev = forecastEvents(all, months), today = D.startOfDay(new Date());
     const after = cfg.balance == null ? [] : all.filter(x => isPaid(x.p) && x.p.date && x.p.date > (cfg.balanceDate || todayISO())); // paid since the balance was entered
@@ -3295,15 +3340,14 @@
       const sum = k => es.filter(e => e.kind === k).reduce((s, e) => s + e.amt, 0), net = es.reduce((s, e) => s + e.amt, 0); run += net;
       rows.push({ ms, pay: sum('pay'), mo: sum('mo'), other: sum('other'), inn: sum('in'), net, end: run });
     }
-    const neg = bal == null ? null : rows.find(r => r.end < 0), low = rows.reduce((a, r) => r.end < a.end ? r : a, rows[0]);
-    if (neg) h += '<div class="pwarn">The balance goes below zero in <b>' + esc(monthName(neg.ms)) + '</b> (AED ' + money(neg.end) + ' at the end of the month)' + (low !== neg ? ' and is lowest in <b>' + esc(monthName(low.ms)) + '</b> (AED ' + money(low.end) + ')' : '') + '.</div>';
+    h += fcRegular() + fcCharts(rows, bal, rate);
     h += '<div class="pscroll"><table class="ptable fc"><thead><tr><th>Month</th><th class="r">Payroll</th><th class="r">Month-end</th><th class="r">Other payments</th><th class="r">Money in</th><th class="r">Net</th><th class="r">' + (bal == null ? 'Running total' : 'Balance at month end') + '</th></tr></thead><tbody>' +
       rows.map(r => '<tr><td>' + esc(monthName(r.ms)) + '</td><td class="r">' + money0(-r.pay) + '</td><td class="r">' + money0(-r.mo) + '</td><td class="r">' + money0(-r.other) + '</td><td class="r in">' + money0(r.inn) + '</td><td class="r' + (r.net < 0 ? ' neg' : '') + '">' + money0(r.net) + '</td><td class="r' + (r.end < 0 ? ' neg' : '') + '"><b>' + money0(r.end) + '</b><span class="psub">$' + money0(r.end / rate) + '</span></td></tr>').join('') + '</tbody></table></div>' +
       '<p class="hint pcenter">Payroll uses the roster (new people at full 2-week pay). Payrolls and payments already in Pending are counted on their date instead.</p>';
     // repeating payments
     const rec = cfg.recurring.slice().sort((a, b) => (a.next || '').localeCompare(b.next || ''));
     h += '<div class="psec"><h3>Repeating payments <span class="n">' + rec.length + '</span></h3><span class="spacer"></span><button type="button" class="chipbtn" data-recfind="1">Find them in my history</button><button type="button" class="chipbtn" data-recedit="1">Edit</button></div>';
-    h += rec.length ? '<div class="pscroll"><table class="ptable"><thead><tr><th>What</th><th>How often</th><th>Next</th><th class="r">AED</th></tr></thead><tbody>' + rec.map(r => '<tr><td>' + esc(r.name) + (r.until ? '<span class="psub">until ' + esc(payDate(r.until)) + '</span>' : '') + '</td><td>' + esc(EVERY_NAME[r.every] || '') + '</td><td>' + esc(payDate(r.next)) + '</td><td class="r' + (r.dir === 'in' ? ' in' : '') + '">' + (r.dir === 'in' ? '+' : '') + money(r.amount) + '</td></tr>').join('') + '</tbody></table></div>'
+    h += rec.length ? '<div class="pscroll"><table class="ptable"><thead><tr><th>What</th><th>How often</th><th>Next</th><th class="r">AED</th></tr></thead><tbody>' + rec.map(r => '<tr><td>' + esc(r.name) + (r.until ? '<span class="psub">until ' + esc(payDate(r.until)) + '</span>' : '') + '</td><td>' + esc(EVERY_NAME[r.every] || '') + '</td><td>' + esc(payDate(r.next)) + '</td><td class="r' + (r.dir === 'in' ? ' in' : '') + '">' + (r.dir === 'in' ? '+' : '') + money(r.amount) + (r.from && r.amount2 ? '<span class="psub">' + money(r.amount2) + ' from ' + esc(payDate(r.from)) + '</span>' : '') + '</td></tr>').join('') + '</tbody></table></div>'
       : '<p class="hint pcenter">Add rents, allowances, insurance and money coming in. “Find them in my history” suggests the ones that repeat in your imported sheet.</p>';
     // the next 8 weeks, item by item
     const soon = ev.filter(e => e.d <= D.addDays(today, 56)); let b2 = bal || 0;
@@ -3311,29 +3355,31 @@
     return h;
   }
   function recRowHtml(r) {
-    return '<tr data-rid="' + (r.id || uid()) + '"><td><input class="ctl c-name" value="' + esc(r.name || '') + '" placeholder="e.g. Quarterly rent" aria-label="What"></td>' +
+    return '<tr data-rid="' + (r.id || uid()) + '"' + (r.src ? ' data-src="' + esc(r.src) + '"' : '') + '><td><input class="ctl c-name" value="' + esc(r.name || '') + '" placeholder="e.g. Quarterly rent" aria-label="What"></td>' +
       '<td><select class="ctl c-dir" aria-label="In or out"><option value="out"' + (r.dir !== 'in' ? ' selected' : '') + '>Out</option><option value="in"' + (r.dir === 'in' ? ' selected' : '') + '>In</option></select></td>' +
       '<td><input class="ctl c-amt r" value="' + (r.amount ? money(r.amount) : '') + '" inputmode="decimal" aria-label="Amount AED"></td>' +
       '<td><select class="ctl c-every" aria-label="How often">' + EVERY.map(([k, l]) => '<option value="' + k + '"' + ((r.every || 'mo') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td>' +
       '<td><input class="ctl c-next" type="date" value="' + esc(r.next || '') + '" aria-label="Next date"></td><td><input class="ctl c-until" type="date" value="' + esc(r.until || '') + '" aria-label="Until"></td>' +
+      '<td><input class="ctl c-from" type="date" value="' + esc(r.from || '') + '" aria-label="New amount from"></td><td><input class="ctl c-amt2 r" value="' + (r.amount2 ? money(r.amount2) : '') + '" inputmode="decimal" aria-label="New amount"></td>' +
       '<td><button type="button" class="iconbtn" data-crm="1" aria-label="Remove" title="Remove">' + I.x + '</button></td></tr>';
   }
   function openRecurring(add) {
     const rs = payCfg().recurring.concat(add || []);
     $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="reTitle"><div class="sheet-head"><h2 id="reTitle">Repeating payments</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
-      '<p class="hint">Payroll comes from the roster, so don’t add it here. Add rents, allowances, insurance, fees, and money that comes in regularly. Leave Until empty if it keeps going.</p>' +
-      '<div class="pscroll"><table class="btable"><thead><tr><th>What</th><th>In / out</th><th class="r">Amount AED</th><th>How often</th><th>Next date</th><th>Until</th><th></th></tr></thead><tbody id="reRows">' + (rs.length ? rs : [{}]).map(recRowHtml).join('') + '</tbody></table></div>' +
+      '<p class="hint">Payroll comes from the roster, so don’t add it here. Add rents, allowances, insurance, fees, and money that comes in regularly. Leave Until empty if it keeps going. If the amount changes at a renewal, put the date in <b>Changes on</b> and the new amount next to it: the forecast uses the old amount before that date and the new one after.</p>' +
+      '<div class="pscroll"><table class="btable"><thead><tr><th>What</th><th>In / out</th><th class="r">Amount AED</th><th>How often</th><th>Next date</th><th>Until</th><th>Changes on</th><th class="r">New amount</th><th></th></tr></thead><tbody id="reRows">' + (rs.length ? rs : [{}]).map(recRowHtml).join('') + '</tbody></table></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn" data-cadd="1">' + I.plus + 'Add line</button></div>' +
       '<div class="pform-acts"><button type="button" class="chipbtn solid" data-csave="1">Save</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="reMsg"></span></div></div></div>';
     $('#sheet').hidden = false;
   }
   async function recSave() {
-    const rs = [...document.querySelectorAll('#reRows tr')].map(tr => ({ id: tr.dataset.rid, name: $('.c-name', tr).value.trim(), dir: $('.c-dir', tr).value, amount: toNum($('.c-amt', tr).value), every: $('.c-every', tr).value, next: $('.c-next', tr).value, until: $('.c-until', tr).value })).filter(r => r.name || r.amount > 0);
+    const rs = [...document.querySelectorAll('#reRows tr')].map(tr => ({ id: tr.dataset.rid, name: $('.c-name', tr).value.trim(), dir: $('.c-dir', tr).value, amount: toNum($('.c-amt', tr).value), every: $('.c-every', tr).value, next: $('.c-next', tr).value, until: $('.c-until', tr).value, from: $('.c-from', tr).value, amount2: toNum($('.c-amt2', tr).value) || 0, src: tr.dataset.src || undefined })).filter(r => r.name || r.amount > 0);
     if (rs.some(r => !r.name || !(r.amount > 0) || !r.next)) { $('#reMsg').textContent = 'Each line needs what it is, an amount and a next date.'; return; }
     if (!(await needVault())) return;
     snapshot(); await setPayCfg({ recurring: rs }); closeSheet(); render(); toast('Repeating payments saved', true);
   }
   // Suggest repeating payments from history: same name and amount, at a steady gap (2 weeks, a month, 3 or 6 months, a year)
+  const recKey = v => normName(v.name) + '|' + v.dir + '|' + Math.round(v.amount);
   function findRecurring() {
     const cfg = payCfg(), have = new Set(cfg.recurring.map(r => normName(r.name) + '|' + Math.round(r.amount))), rosterNames = new Set(cfg.roster.map(r => normName(payName(r))));
     const g = new Map(); pays().filter(x => !x.p.run && x.p.date && x.p.amount >= 100 && x.p.status === 'paid' && !x.p.failed).forEach(x => { const nm = x.p.payee || (x.p.dir === 'in' ? 'Head office funding' : x.p.what) || 'Payment'; const k = normName(nm) + '|' + x.p.dir + '|' + Math.round(x.p.amount); if (!g.has(k)) g.set(k, { name: nm, dir: x.p.dir, amount: x.p.amount, ds: [] }); g.get(k).ds.push(x.p.date); });
@@ -3343,7 +3389,7 @@
       const gaps = ds.slice(1).map((d, i) => D.diffDays(D.fromISO(d), D.fromISO(ds[i]))).slice(-4).sort((a, b) => a - b), gap = gaps[Math.floor((gaps.length - 1) / 2)]; // the recent pattern
       const every = gap >= 12 && gap <= 16 ? '2w' : gap >= 26 && gap <= 35 ? 'mo' : gap >= 80 && gap <= 100 ? 'q' : gap >= 170 && gap <= 195 ? '6m' : gap >= 350 && gap <= 380 ? 'y' : '';
       if (!every || (ds.length < 3 && (every === '2w' || every === 'mo'))) return;
-      if (have.has(normName(v.name) + '|' + Math.round(v.amount)) || rosterNames.has(normName(v.name))) return;
+      if (have.has(normName(v.name) + '|' + Math.round(v.amount)) || rosterNames.has(normName(v.name)) || (cfg.recIgnore || []).includes(recKey(v))) return;
       let nx = stepDate(D.fromISO(ds[ds.length - 1]), every); while (nx < today) nx = stepDate(nx, every);
       if (D.diffDays(today, D.fromISO(ds[ds.length - 1])) > 400) return; // stopped long ago
       out.push({ id: uid(), name: v.name, dir: v.dir, amount: v.amount, every, next: D.toISO(nx), until: '', seen: ds.length, last: ds[ds.length - 1] });
@@ -3353,9 +3399,103 @@
   function openRecFind() {
     const fs = findRecurring(); ui.recFound = fs;
     $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="rfTitle"><div class="sheet-head"><h2 id="rfTitle">Repeating payments in your history</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
-      (fs.length ? '<p class="hint">Tick the ones that will keep happening. You can change amounts and dates on the next screen.</p><div class="plist">' + fs.map((f, i) => '<label class="prow fcrow"><input type="checkbox" class="pchk" data-rf="' + i + '"><span class="pmain"><span class="pwho">' + esc(f.name) + '</span><span class="psub">' + esc(EVERY_NAME[f.every]) + ' · seen ' + f.seen + ' times, last ' + esc(payDate(f.last)) + ' · next ' + esc(payDate(f.next)) + '</span></span><span class="pamt' + (f.dir === 'in' ? ' in' : '') + '">' + (f.dir === 'in' ? '+' : '') + money(f.amount) + '</span></label>').join('') + '</div>' : '<p>Nothing repeats steadily in your history yet. Import more of your sheet, or add them by hand.</p>') +
+      (fs.length ? '<p class="hint">Tick the ones that will keep happening. The ones you leave unticked won’t be suggested again. You can change amounts and dates on the next screen.</p><div class="plist">' + fs.map((f, i) => '<label class="prow fcrow"><input type="checkbox" class="pchk" data-rf="' + i + '"><span class="pmain"><span class="pwho">' + esc(f.name) + '</span><span class="psub">' + esc(EVERY_NAME[f.every]) + ' · seen ' + f.seen + ' times, last ' + esc(payDate(f.last)) + ' · next ' + esc(payDate(f.next)) + '</span></span><span class="pamt' + (f.dir === 'in' ? ' in' : '') + '">' + (f.dir === 'in' ? '+' : '') + money(f.amount) + '</span></label>').join('') + '</div>' : '<p>Nothing repeats steadily in your history yet. Import more of your sheet, or add them by hand.</p>') +
       '<div class="pform-acts"><button type="button" class="chipbtn solid" data-rfgo="1"' + (fs.length ? '' : ' disabled') + '>Next</button><button type="button" class="chipbtn" data-close="1">Cancel</button></div></div></div>';
     $('#sheet').hidden = false;
+  }
+
+
+  /* ---- Bank statement check: match the bank's lines to Tally's payments ----
+     The statement (Excel from the bank, or its rows pasted) is read here on this device only. */
+  // A tiny .xlsx reader: the first sheet's cells as rows of text (needs no library)
+  async function readXlsx(file) {
+    const buf = new Uint8Array(await file.arrayBuffer()), dv = new DataView(buf.buffer); let e = buf.length - 22;
+    while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--; if (e < 0) throw new Error('not a zip');
+    const files = {}; let q = dv.getUint32(e + 16, true);
+    for (let i = 0, n = dv.getUint16(e + 10, true); i < n; i++) { const nl = dv.getUint16(q + 28, true), xl = dv.getUint16(q + 30, true), cl = dv.getUint16(q + 32, true); files[new TextDecoder().decode(buf.subarray(q + 46, q + 46 + nl))] = { m: dv.getUint16(q + 10, true), size: dv.getUint32(q + 20, true), at: dv.getUint32(q + 42, true) }; q += 46 + nl + xl + cl; }
+    const get = async name => { const f = files[name]; if (!f) return null; const h = f.at, d = buf.subarray(h + 30 + dv.getUint16(h + 26, true) + dv.getUint16(h + 28, true)).subarray(0, f.size); if (!f.m) return new TextDecoder().decode(d); return new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text(); };
+    const xml = s => new DOMParser().parseFromString(s, 'application/xml'), ss = await get('xl/sharedStrings.xml');
+    const strs = ss ? [...xml(ss).getElementsByTagName('si')].map(si => si.textContent) : [];
+    const sheet = Object.keys(files).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0]; if (!sheet) throw new Error('no sheet');
+    const col = r => { let n = 0; for (const ch of r.replace(/\d+/g, '')) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+    return [...xml(await get(sheet)).getElementsByTagName('row')].map(row => { const out = []; [...row.getElementsByTagName('c')].forEach(c => { const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0], is = c.getElementsByTagName('t')[0]; out[col(c.getAttribute('r') || 'A1')] = t === 's' ? strs[+(v && v.textContent)] || '' : t === 'inlineStr' ? (is ? is.textContent : '') : v ? v.textContent : ''; }); return Array.from(out, x => x == null ? '' : String(x)); });
+  }
+  const csvRows = text => String(text || '').split(/\r?\n/).map(l => { const out = []; let cur = '', q = false; for (let i = 0; i < l.length; i++) { const ch = l[i]; if (q) { if (ch === '"' && l[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; } else if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; });
+  // The bank writes dates day first (13-11-2026); Excel may give a date number
+  function bankDate(s) { s = String(s || '').trim(); let m; if ((m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/))) return D.toISO(new Date(+m[3], +m[2] - 1, +m[1])); if (/^\d{5}(\.\d+)?$/.test(s)) return D.toISO(new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 864e5 + new Date().getTimezoneOffset() * 6e4)); return sheetDate(s); }
+  function parseStatement(rows) {
+    let bal = null; rows.forEach(r => r.forEach(c => { const m = String(c).match(/current balance\s*:\s*(-?[\d,]+(\.\d+)?)/i); if (m && bal == null) bal = toNum(m[1]); }));
+    const hi = rows.findIndex(r => r.some(c => /narration|description/i.test(c)) && r.some(c => /debit/i.test(c))); if (hi < 0) return null;
+    const H = rows[hi].map(c => String(c).toLowerCase()), at = re => H.findIndex(c => re.test(c));
+    const ci = { date: at(/transaction date|^date/), text: at(/narration|description/), ref: at(/reference/), out: at(/debit/), inn: at(/credit/), bal: at(/balance/) };
+    const tx = rows.slice(hi + 1).map(r => ({ date: bankDate(r[ci.date]), text: String(r[ci.text] || '').trim(), ref: String(r[ci.ref] || '').trim(), out: toNum(r[ci.out]) || 0, inn: toNum(r[ci.inn]) || 0, bal: ci.bal >= 0 ? toNum(r[ci.bal]) : NaN })).filter(t => t.date && (t.out > 0 || t.inn > 0));
+    if (!tx.length) return null;
+    const ds = tx.map(t => t.date).sort(), last = tx.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+    return { tx, from: ds[0], to: ds[ds.length - 1], bal: bal != null ? bal : isFinite(last.bal) ? last.bal : null };
+  }
+  const isFeeLine = t => /^(charges|value added tax|vat\b)/i.test(t.text);
+  const isFeePay = p => /bank fee|charges|\bfees?\b|\bvat\b|value added tax/i.test(p.what || '');
+  const feeVendor = () => { const c = {}; pays().filter(x => isFeePay(x.p) && x.p.payee).forEach(x => { c[x.p.payee] = (c[x.p.payee] || 0) + 1; }); return (Object.entries(c).sort((a, b) => b[1] - a[1])[0] || [''])[0]; }; // the name you use on your bank-fee rows
+  const near = (a, b, n) => Math.abs(D.diffDays(D.fromISO(a), D.fromISO(b))) <= n;
+  function bankMatch(st) {
+    const used = new Set(), res = { single: [], basket: [], fees: [], bankOnly: [], tallyOnly: [], toPaid: [] };
+    st.tx.forEach(t => { delete t.hit; }); // a fresh match every time
+    const pool = pays().filter(x => !(x.p.failed && !x.p.redone) && !x.p.twice && (!isPaid(x.p) || (x.p.date && x.p.date >= D.toISO(D.addDays(D.fromISO(st.from), -10)) && x.p.date <= D.toISO(D.addDays(D.fromISO(st.to), 5)))));
+    const dirOf = t => t.inn > 0 ? 'in' : 'out', amtOf = t => t.inn > 0 ? t.inn : t.out, same = (a, b) => Math.abs(a - b) < 0.01;
+    const main = st.tx.filter(t => !isFeeLine(t)), fees = st.tx.filter(isFeeLine);
+    // 1. one bank line = one payment (same amount and direction, nearest date within 10 days)
+    main.forEach(t => {
+      const c = pool.filter(x => !used.has(x.t.id) && x.p.dir === dirOf(t) && same(x.p.amount, amtOf(t)) && (!x.p.date || near(x.p.date, t.date, 10))).sort((a, b) => Math.abs(D.diffDays(D.fromISO(a.p.date || t.date), D.fromISO(t.date))) - Math.abs(D.diffDays(D.fromISO(b.p.date || t.date), D.fromISO(t.date))))[0];
+      if (c) { used.add(c.t.id); t.hit = true; res.single.push({ t, x: c }); if (!isPaid(c.p)) res.toPaid.push({ t, xs: [c] }); }
+    });
+    // 2. a basket payment = several payments: a payroll, or everything paid that day (bank fees aside)
+    main.filter(t => !t.hit && t.out > 0).forEach(t => {
+      const free = pool.filter(x => !used.has(x.t.id) && x.p.dir === 'out' && !isFeePay(x.p) && (!x.p.date || near(x.p.date, t.date, 3)));
+      const groups = []; const runs = new Map(), days = new Map();
+      free.forEach(x => { if (x.p.run) { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); } const d = x.p.date || ''; if (!days.has(d)) days.set(d, []); days.get(d).push(x); });
+      runs.forEach(v => groups.push(v)); days.forEach(v => groups.push(v)); runs.forEach((v, n) => { const d = v[0].p.date; if (days.has(d)) groups.push([...new Set(days.get(d).concat(v))]); });
+      const g = groups.find(xs => xs.length > 1 && same(xs.reduce((s, x) => s + x.p.amount, 0), t.out));
+      if (g) { g.forEach(x => used.add(x.t.id)); t.hit = true; res.basket.push({ t, xs: g }); const pend = g.filter(x => !isPaid(x.p)); if (pend.length) res.toPaid.push({ t, xs: pend }); }
+    });
+    // 3. bank fees: the day's fee lines against Tally's bank-fee payments around that day
+    const fd = new Map(); fees.forEach(t => fd.set(t.date, (fd.get(t.date) || 0) + t.out));
+    [...fd].sort().forEach(([d, amt]) => {
+      const cand = pool.filter(x => !used.has(x.t.id) && x.p.dir === 'out' && isFeePay(x.p) && x.p.date && near(x.p.date, d, 3));
+      const exact = cand.find(x => same(x.p.amount, amt)), sameDay = cand.filter(x => x.p.date === d), tot = sameDay.reduce((s, x) => s + x.p.amount, 0);
+      if (exact) { used.add(exact.t.id); res.fees.push({ d, amt, ok: true }); }
+      else if (sameDay.length && same(tot, amt)) { sameDay.forEach(x => used.add(x.t.id)); res.fees.push({ d, amt, ok: true }); }
+      else { sameDay.forEach(x => used.add(x.t.id)); res.fees.push({ d, amt, have: tot, ok: false }); }
+    });
+    res.bankOnly = main.filter(t => !t.hit);
+    res.tallyOnly = pool.filter(x => isPaid(x.p) && !used.has(x.t.id) && x.p.date >= st.from && x.p.date <= st.to);
+    return res;
+  }
+  function openBankCheck() {
+    $('#sheet').innerHTML = '<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="bcTitle"><div class="sheet-head"><h2 id="bcTitle">Check a bank statement</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body bform">' +
+      '<ol class="howto"><li>In your online banking, download the account statement as <b>Excel</b>.</li><li>Choose the file below, or open it, copy the rows and paste them in the box.</li></ol>' +
+      '<p class="hint">The statement is read here on this device. Nothing from it is kept unless you click a button below to add or update a payment.</p>' +
+      '<div class="pform-acts"><label class="chipbtn solid bcfile">Choose statement file<input type="file" id="bc_file" accept=".xlsx,.csv,.txt" hidden></label><span class="hint" id="bcMsg"></span></div>' +
+      '<details><summary class="hint">Or paste the rows</summary><textarea class="ctl" id="bc_rows" rows="6" placeholder="Transaction Date, Value Date, Narration, Transaction Reference, Debit, Credit, Running Balance"></textarea><div class="pform-acts"><button type="button" class="chipbtn" data-bcpaste="1">Check</button></div></details>' +
+      '<div id="bcOut"></div></div></div>';
+    $('#sheet').hidden = false;
+  }
+  function bankRender() {
+    const st = ui.bank, el = $('#bcOut'); if (!st || !el) return;
+    const r = bankMatch(st), cfg = payCfg(), line = t => '<span class="pdate">' + esc(payDate(t.date)) + '</span><span class="pmain"><span class="pwho">' + esc(t.text) + '</span><span class="psub">' + esc(t.ref) + '</span></span><span class="pamt' + (t.inn > 0 ? ' in' : '') + '">' + (t.inn > 0 ? '+' + money(t.inn) : money(t.out)) + '</span>';
+    const nMatch = r.single.length + r.basket.length, badFees = r.fees.filter(f => !f.ok);
+    let h = '<div class="bcsum"><b>' + esc(payDate(st.from)) + ' – ' + esc(payDate(st.to)) + '</b> · ' + st.tx.length + ' bank lines · <span class="ok">' + nMatch + ' matched</span>' + (r.basket.length ? ' (' + r.basket.length + ' basket' + (r.basket.length === 1 ? '' : 's') + ')' : '') + ' · ' + (r.bankOnly.length ? '<span class="bad">' + r.bankOnly.length + ' not in Tally</span>' : 'nothing missing') + ' · ' + (r.tallyOnly.length ? '<span class="bad">' + r.tallyOnly.length + ' in Tally but not at the bank</span>' : 'nothing extra') + '</div>';
+    if (st.bal != null) h += '<div class="pnext"><div><b>Bank balance: AED ' + money(st.bal) + '</b><span class="psub">From the statement, ' + esc(payDate(st.to)) + (cfg.balance != null ? ' · Tally has AED ' + money(cfg.balance) + ' entered ' + esc(payDate(cfg.balanceDate)) : '') + '</span></div>' + (cfg.balance != null && same2(cfg.balance, st.bal) && cfg.balanceDate === st.to ? '<span class="hint">Already in use</span>' : '<button type="button" class="chipbtn solid" data-bcbal="1">Use as bank balance</button>') + '</div>';
+    if (r.toPaid.length) h += '<h3>Left the bank but still pending in Tally</h3><div class="plist">' + r.toPaid.map((m, i) => '<div class="prow bcrow">' + line(m.t) + '<button type="button" class="chipbtn" data-bcpaid="' + i + '">Mark ' + (m.xs.length > 1 ? m.xs.length + ' paid' : 'paid') + '</button></div>').join('') + '</div>';
+    if (r.bankOnly.length) h += '<h3>At the bank, not in Tally</h3><div class="plist">' + r.bankOnly.map((t, i) => '<div class="prow bcrow">' + line(t) + '<button type="button" class="chipbtn" data-bcadd="' + i + '">Add to Tally</button></div>').join('') + '</div>';
+    if (badFees.length) h += '<h3>Bank fees that don’t match</h3><div class="plist">' + badFees.map((f, i) => '<div class="prow bcrow"><span class="pdate">' + esc(payDate(f.d)) + '</span><span class="pmain"><span class="pwho">Bank charged ' + money(f.amt) + '</span><span class="psub">Tally has ' + money(f.have || 0) + ' that day</span></span><span class="pamt">' + money(r2(f.amt - (f.have || 0))) + '</span><button type="button" class="chipbtn" data-bcfee="' + i + '">Add the difference</button></div>').join('') + '</div>';
+    if (r.tallyOnly.length) h += '<h3>Paid in Tally, not on this statement</h3><p class="hint">It may still be on its way, or it didn’t go through. Open it to check.</p><div class="plist">' + r.tallyOnly.map(x => payRow(x, { why: true })).join('') + '</div>';
+    h += '<details class="bcok"><summary class="hint">Matched (' + nMatch + ')</summary><div class="plist">' + r.single.map(m => '<div class="prow bcrow">' + line(m.t) + '<span class="hint">' + esc(m.x.p.payee || m.x.p.what || '') + (m.x.p.date && m.x.p.date !== m.t.date ? ' · Tally date ' + esc(payDate(m.x.p.date)) : '') + '</span></div>').join('') + r.basket.map(m => '<div class="prow bcrow">' + line(m.t) + '<span class="hint">' + m.xs.length + ' payments' + (m.xs[0].p.run ? ' · payroll ' + esc(m.xs[0].p.run) : '') + '</span></div>').join('') + '</div></details>';
+    ui.bankRes = r; el.innerHTML = h;
+  }
+  const same2 = (a, b) => Math.abs(Number(a) - Number(b)) < 0.01;
+  async function bankLoad(rows) {
+    const st = parseStatement(rows); if (!st) { $('#bcMsg').textContent = 'That doesn’t look like a bank statement: I couldn’t find the Debit and Narration columns.'; return; }
+    if (!(await needVault())) return; ui.bank = st; $('#bcMsg').textContent = ''; bankRender();
   }
 
   /* ---- Copy for Excel ---- */
@@ -3393,6 +3533,7 @@
       '<div class="pgrid">' + f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') + '</div>' +
       '<label class="pcheck"><input type="checkbox" id="pf_failed"' + (p.failed ? ' checked' : '') + '> The transfer didn’t go through</label>' +
       (p.failed ? '<label class="pcheck"><input type="checkbox" id="pf_redone"' + (p.redone ? ' checked' : '') + '> Paid again since</label>' : '') +
+      f('rec', 'Repeats', '<select class="ctl" id="pf_rec">' + opt([['', 'No']].concat(EVERY.filter(e => e[0] !== 'once')), (payCfg().recurring.find(r => raw && r.src === raw.id) || {}).every || '') + '</select>') +
       inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paycheck short by one day"') +
       f('note', 'Notes (copied to the sheet)', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
       (p.run ? '<p class="hint">Part of payroll ' + esc(p.run) + '.</p>' : '') +
@@ -3409,8 +3550,14 @@
     const fields = { date: v('date') || (v('status') === 'paid' ? todayISO() : ''), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
     snapshot();
     const raw = form.dataset.payid && taskById(form.dataset.payid);
-    if (raw) Object.assign(payOf(raw), fields); else await addPayment(fields);
-    save(); closeSheet(); render(); toast(raw ? 'Payment saved' : 'Payment added', true);
+    const t = raw || await addPayment(fields); if (raw) Object.assign(payOf(raw), fields);
+    // Repeats: keep one repeating payment for it (next one after this), or remove it
+    const every = $('#pf_rec').value, cfg = payCfg(), had = cfg.recurring.find(r => r.src === t.id);
+    if (every) { let nx = stepDate(fields.date ? D.fromISO(fields.date) : D.startOfDay(new Date()), every); while (nx < D.startOfDay(new Date())) nx = stepDate(nx, every);
+      const rec = Object.assign(had || { id: uid(), src: t.id, until: '' }, { name: fields.payee || fields.what, dir: fields.dir, amount: fields.amount, every, next: had && had.every === every && had.next > D.toISO(nx) ? had.next : D.toISO(nx) });
+      await setPayCfg({ recurring: had ? cfg.recurring : cfg.recurring.concat([rec]) }); }
+    else if (had) await setPayCfg({ recurring: cfg.recurring.filter(r => r !== had) });
+    save(); closeSheet(); render(); toast((raw ? 'Payment saved' : 'Payment added') + (every ? ' · repeats ' + EVERY_NAME[every].toLowerCase() + ' in the forecast' : ''), true);
   }
 
   /* ---- import rows from the cash-flow sheet ---- */
@@ -3474,14 +3621,21 @@
   function bindPay() {
     if (!PAY_ON) return;
     const go = () => needVault().then(ok => { if (ok) render(); });
+    $('#content').addEventListener('mousemove', e => {
+      const hit = e.target.closest && e.target.closest('.fcsvg .fchit'), tip = $('.fctip'); if (!tip) return;
+      if (!hit) { tip.hidden = true; document.querySelectorAll('.fcsvg .fchit.on').forEach(x => x.classList.remove('on')); return; }
+      document.querySelectorAll('.fcsvg .fchit.on').forEach(x => x !== hit && x.classList.remove('on')); hit.classList.add('on');
+      const [t, ...ls] = hit.dataset.tip.split('|'); tip.innerHTML = '<b>' + t + '</b>' + ls.map(l => '<span>' + l + '</span>').join('');
+      tip.hidden = false; const box = $('.fcdash').getBoundingClientRect(); tip.style.left = Math.min(box.width - 180, e.clientX - box.left + 14) + 'px'; tip.style.top = (e.clientY - box.top + 14) + 'px';
+    });
     $('#content').addEventListener('mousedown', e => { if (e.shiftKey && e.target.matches && e.target.matches('[data-paysel]')) e.preventDefault(); }); // no text highlighting on Shift-click
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-paybasket],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore],[data-payselall],[data-paydelsel],[data-rosteraz],[data-bankcheck],[data-sheetmore],[data-sadd],[data-sdel],[data-runmore],[data-payroster],[data-payrosterimport],[data-rosteropen],[data-recedit],[data-recfind]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
-      if (d.paytab) { ui.payTab = d.paytab; ui.paySel = new Set(); renderMain(); return; }
+      if (d.paytab) { ui.payTab = d.paytab; ui.paySel = new Set(); renderMain(); if (d.paytab === 'sheet') requestAnimationFrame(() => { const w = $('.sheetwrap'); if (w) w.scrollTop = w.scrollHeight; }); return; } // the sheet opens at the bottom: scheduled and pending
       if (d.paynew) return openPayForm(null);
       if (d.payimport) return openImport();
       if (d.paybasket !== undefined) return openBasket(d.paybasket || d.kind);
@@ -3498,6 +3652,7 @@
         const y = $('#content').scrollTop; renderMain(); $('#content').scrollTop = y; return;
       }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
+      if (d.bankcheck) return openBankCheck();
       if (d.rosteraz) { (async () => { snapshot(); await setPayCfg({ rosterSort: 'alpha' }); renderMain(); toast('Payroll order: A–Z', true); })(); return; }
       if (d.sheetmore) { ui.sheetLimit = (ui.sheetLimit || 150) + 300; renderMain(); return; }
       if (d.sadd) { (async () => { snapshot(); const t = await addPayment({ status: d.sadd, date: d.sadd === 'paid' ? todayISO() : '' }); save(); ui.payFind = ''; renderMain(); const f = document.querySelector('tr[data-sid="' + t.id + '"] .s-payee'); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } })(); return; }
@@ -3518,7 +3673,7 @@
     });
     // Pending: drag a row to change the order (saved with the payment)
     const content = $('#content');
-    const DRAG = '.prow[data-pdrag], .prow[data-rdrag], tr[data-rdrag]';
+    const DRAG = '.prow[data-pdrag], .prow[data-rdrag], tr[data-rdrag], tr[data-pdrag]';
     const dragKey = el => el.dataset.pdrag ? 'p:' + el.dataset.pdrag : 'r:' + el.dataset.rdrag;
     content.addEventListener('dragstart', e => { const r = ui.view === 'payments' && e.target.closest && e.target.closest(DRAG); if (!r) return; ui.payDrag = { key: dragKey(r), kind: r.dataset.pdrag ? 'p' : 'r', box: r.parentElement }; r.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', ui.payDrag.key); e.dataTransfer.effectAllowed = 'move'; } catch (err) { } });
     const clearMarks = () => document.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
@@ -3565,7 +3720,17 @@
       if (t.closest('[data-cadd]')) { $('#reRows').insertAdjacentHTML('beforeend', recRowHtml({})); $('.c-name', $('#reRows').lastElementChild).focus(); return; }
       if (t.closest('[data-crm]')) { t.closest('tr').remove(); return; }
       if (t.closest('[data-csave]')) return recSave();
-      if (t.closest('[data-rfgo]')) { const pick = [...document.querySelectorAll('[data-rf]')].filter(x => x.checked).map(x => ui.recFound[+x.dataset.rf]); openRecurring(pick); return; }
+      if (t.closest('[data-bcpaste]')) { const v = $('#bc_rows').value; bankLoad(v.includes('\t') ? v.split(/\r?\n/).map(l => l.split('\t')) : csvRows(v)); return; }
+      const bc = t.closest('[data-bcbal],[data-bcpaid],[data-bcadd],[data-bcfee]');
+      if (bc && ui.bank && ui.bankRes) { (async () => {
+        const st = ui.bank, r = ui.bankRes, d = bc.dataset; snapshot();
+        if (d.bcbal) { await setPayCfg({ balance: st.bal, balanceDate: st.to }); toast('Bank balance set to AED ' + money(st.bal)); }
+        if (d.bcpaid) { const m = r.toPaid[+d.bcpaid]; m.xs.forEach(x => { x.p.status = 'paid'; x.p.date = m.t.date; }); save(); toast(m.xs.length + ' marked paid on ' + payDate(m.t.date), true); }
+        if (d.bcadd) { const tx = r.bankOnly[+d.bcadd]; await addPayment({ date: tx.date, payee: tx.inn > 0 ? '' : '', what: tx.text, amount: tx.inn > 0 ? tx.inn : tx.out, dir: tx.inn > 0 ? 'in' : 'out', status: 'paid', note: tx.ref }); save(); toast('Added to Tally', true); }
+        if (d.bcfee) { const f = r.fees.filter(f => !f.ok)[+d.bcfee]; await addPayment({ date: f.d, payee: feeVendor(), what: 'bank fees', amount: r2(f.amt - (f.have || 0)), dir: 'out', status: 'paid' }); save(); toast('Bank fees added', true); }
+        bankRender(); renderMain();
+      })(); return; }
+      if (t.closest('[data-rfgo]')) { const bx = [...document.querySelectorAll('[data-rf]')], pick = bx.filter(x => x.checked).map(x => ui.recFound[+x.dataset.rf]), skip = bx.filter(x => !x.checked).map(x => recKey(ui.recFound[+x.dataset.rf])); (async () => { if (skip.length) await setPayCfg({ recIgnore: [...new Set((payCfg().recIgnore || []).concat(skip))] }); if (pick.length) openRecurring(pick); else { closeSheet(); renderMain(); toast('Got it: those won’t be suggested again'); } })(); return; }
       const del = t.closest('[data-paydel]');
       if (del) {
         if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Click again to delete'; return; }
@@ -3578,6 +3743,7 @@
       if (e.target.id === 'pi_rows') importSum();
       if (e.target.id === 'ri_rows') rosterImportSum();
     });
+    $('#sheet').addEventListener('change', e => { if (e.target.id === 'bc_file' && e.target.files[0]) { const f = e.target.files[0]; $('#bcMsg').textContent = 'Reading…'; (/\.xlsx$/i.test(f.name) ? readXlsx(f) : f.text().then(csvRows)).then(bankLoad).catch(() => { $('#bcMsg').textContent = 'I couldn’t read that file. Try copying the rows and pasting them instead.'; }); e.target.value = ''; } });
     $('#sheet').addEventListener('change', e => { if (e.target.closest('#bkRows')) basketSum(); if (e.target.closest('#roRows')) rosterSum(); });
     $('#sheet').addEventListener('focusout', e => { if (e.target.matches('.b-amt, .r-usd, .r-housing, .c-amt')) { const n = toNum(e.target.value); if (isFinite(n) && !/aed|\/|mo/i.test(e.target.value)) e.target.value = money(n); } });
     $('#sheet').addEventListener('keydown', e => {
