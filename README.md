@@ -50,6 +50,9 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 
 ## Payments (original site only)
 - Shown only where `/config.js` lists `features: ['payments']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=payments` in Vercel.
-- Each payment is an item with `type:'payment'`, always locked: payee, amount, site, status etc. live in `body`, sealed with the locked-items passphrase before saving or syncing. The view asks to unlock first.
-- Status: Requested → Approved → Paid. Tabs: To pay (Requested + Approved), Pay runs, Chase (didn't go through, missing receipt, follow-up note), All (with a filter).
-- Pay run: paste Name / Site / Amount lines from Excel; Repeat copies a run for the next period. Copy for Excel puts the sheet's columns on the clipboard: Date (like 29-Oct-26), Name, Site, Description, In, Out, Balance (a formula: row above + In - Out, works on any row), Notes.
+- Each payment is an item with `type:'payment'`, always locked: everything about it lives in `body`, sealed with the locked-items passphrase before saving or syncing. No payment data is ever in this repo.
+- Columns follow the cash-flow sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
+- Status: Requested → Approved → Paid. Tabs: To pay, Payroll, Chase (didn't go through, missing receipt, follow-up), All.
+- Import from sheet: paste rows A to I. Blank dates carry down; Pending/Due rows go to To pay; a month heading (a forecast) is skipped; rows already in Tally are skipped. A pay period in the Description ("Oct 25 to Nov 7") with a Project makes it payroll; one payroll per pay date.
+- Payroll is every two weeks: the Payroll tab offers the next period (+14 days) with the same people and amounts, plus anything that didn't go through. Extra lines (an expense, a missed payment) take a fourth column: what it's for.
+- Copy for Excel writes the sheet's columns; Balance is a formula that works on any row (row above + Deposit - Check); a transfer that didn't go through is written as the amount in both Deposit and Check with a note, as in the sheet.

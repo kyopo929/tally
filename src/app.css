@@ -1188,3 +1188,5 @@ body.onpay .qa-wrap { display: none; }
   .prow .pchk { grid-area: k; } .prow .pdate { display: none; } .prow .pmain { grid-area: m; } .prow .pamt { grid-area: a; } .prow .pst { grid-area: s; justify-self: end; }
   .pgrid { grid-template-columns: 1fr; }
 }
+.pnext { display: flex; align-items: center; gap: 12px; max-width: 760px; margin: 0 auto 12px; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); }
+.pnext > div { flex: 1; display: grid; gap: 2px; }

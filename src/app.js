@@ -2827,42 +2827,82 @@
 
 
   /* ---------- Payments (original site only): a private log of payments to approve, pay and chase ----------
-     Each payment is an item with type:'payment'. Everything about it (payee, amount, site…) sits in `body`,
-     which is always locked: scrambled with the passphrase before it's saved or synced. */
+     Each payment is an item with type:'payment'. Everything about it (payee, amount, project…) sits in `body`,
+     which is always locked: scrambled with the passphrase before it's saved or synced. Nothing about payments is in the code.
+     Columns follow the cash-flow sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes. */
   const PAY_ST = [['req', 'Requested'], ['ok', 'Approved'], ['paid', 'Paid']];
   const PAY_NAME = Object.fromEntries(PAY_ST);
   const payOf = t => ((vault.plain[t.id] || {}).body) || null;
   const pays = () => vault.key ? S.tasks.filter(isPay).map(t => ({ t, p: payOf(t) })).filter(x => x.p) : [];
   const money = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const toNum = s => { const n = parseFloat(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : NaN; };
+  const isAmt = s => /^\(?-?(AED\s*)?[\d,]+(\.\d+)?\)?$/i.test(String(s || '').trim());
+  const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const monIx = s => MON3.indexOf(String(s || '').slice(0, 3).toLowerCase());
   function payDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : ''); }
-  function xlDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return String(d.getDate()).padStart(2, '0') + '-' + D.MON_SHORT[d.getMonth()] + '-' + String(d.getFullYear()).slice(2); } // like 29-Oct-26, as in the sheet
-  const chaseWhy = p => [p.failed ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
-  const payTabs = [['topay', 'To pay'], ['runs', 'Pay runs'], ['chase', 'Chase'], ['all', 'All']];
+  function xlDate(iso) { if (!iso) return ''; const d = D.fromISO(iso); return String(d.getDate()).padStart(2, '0') + '-' + D.MON_SHORT[d.getMonth()] + '-' + String(d.getFullYear()).slice(2); } // like 13-Nov-26, as in the sheet
+  // A date as Excel copies it: 13-Nov-26, 11/13/2026 (month/day), 2026-11-13
+  function sheetDate(s) {
+    s = String(s || '').trim(); let m, y, mo, d;
+    if ((m = s.match(/^(\d{1,2})[- ]([A-Za-z]{3,9})[- ,]+(\d{2,4})$/))) { d = +m[1]; mo = monIx(m[2]); y = +m[3]; }
+    else if ((m = s.match(/^([A-Za-z]{3,9})\.? (\d{1,2}),? (\d{4})$/))) { mo = monIx(m[1]); d = +m[2]; y = +m[3]; }
+    else if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/))) { mo = +m[1] - 1; d = +m[2]; y = +m[3]; }
+    else if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) { y = +m[1]; mo = +m[2] - 1; d = +m[3]; }
+    else return null;
+    if (y < 100) y += 2000; if (mo < 0 || mo > 11 || !d || d > 31) return null;
+    return D.toISO(new Date(y, mo, d));
+  }
+  // Pay periods written like "Oct 25 to Nov 7" or "October 11 to 24"
+  const PERIOD_RE = /^([A-Za-z]{3,9})\.?\s+(\d{1,2})\s+to\s+(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2})\b/i;
+  const periodText = s => { const m = String(s || '').match(PERIOD_RE); return m && monIx(m[1]) >= 0 && (!m[3] || monIx(m[3]) >= 0) ? m[0] : ''; };
+  function periodDates(name, paidISO) {
+    const m = String(name || '').match(PERIOD_RE); if (!m) return null;
+    const sm = monIx(m[1]), em = m[3] ? monIx(m[3]) : sm; if (sm < 0 || em < 0) return null;
+    const paid = paidISO ? D.fromISO(paidISO) : new Date();
+    let ey = paid.getFullYear(); if (em > paid.getMonth() + 1) ey--; // a December period paid in January
+    const end = new Date(ey, em, +m[4]), start = new Date(sm > em ? ey - 1 : ey, sm, +m[2]);
+    return { start, end };
+  }
+  const periodLabel = (s, e) => D.MON_SHORT[s.getMonth()] + ' ' + s.getDate() + ' to ' + D.MON_SHORT[e.getMonth()] + ' ' + e.getDate();
+  const chaseWhy = p => [p.failed && !p.redone ? 'Didn’t go through' : '', p.receipt === 'no' ? 'Need receipt' : '', p.chase || ''].filter(Boolean);
+  const payTabs = [['topay', 'To pay'], ['runs', 'Payroll'], ['chase', 'Chase'], ['all', 'All']];
   function payFilter(tab, all) {
     if (tab === 'topay') return all.filter(x => x.p.status === 'req' || x.p.status === 'ok');
     if (tab === 'chase') return all.filter(x => chaseWhy(x.p).length);
     return all;
   }
+  const BLANK_PAY = () => ({ date: todayISO(), twice: false, payee: '', check: '', site: '', what: '', amount: 0, dir: 'out', status: 'req', receipt: 'yes', run: '', extra: false, failed: false, redone: false, chase: '', note: '' });
   async function addPayment(fields) {
     const t = newTask({ type: 'payment', locked: true });
-    const p = { body: Object.assign({ date: todayISO(), payee: '', site: '', what: '', amount: 0, dir: 'out', status: 'req', receipt: 'yes', ref: '', run: '', failed: false, chase: '', note: '' }, fields) };
+    const p = { body: Object.assign(BLANK_PAY(), fields) };
     const j = JSON.stringify(p); t.sealed = await encStr(j); vault.plain[t.id] = p; vault.json[t.id] = j; vault.sealedAs[t.id] = t.sealed;
     return t;
   }
   function payRow(x, opts) {
     const p = x.p, why = chaseWhy(p), sel = ui.paySel && ui.paySel.has(x.t.id);
-    const sub = [p.site, p.what].filter(Boolean).map(esc).join(' · ');
+    const sub = [p.site, p.payee ? p.what : '', p.check ? 'Check ' + p.check : ''].filter(Boolean).map(esc).join(' · ');
     const nextSt = { req: 'ok', ok: 'paid' }[p.status];
-    return '<div class="prow' + (sel ? ' on' : '') + (p.failed ? ' bad' : '') + '">' +
-      '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select for copying">' +
+    return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + '">' +
+      '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
       '<span class="pdate">' + esc(payDate(p.date)) + '</span>' +
-      '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
-      ((opts && opts.why && why.length) || (!opts && why.length) ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
+      '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || p.what || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
+      (opts && opts.why && why.length ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
       '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
       '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
   }
   const payTotal = xs => xs.reduce((s, x) => s + (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0), 0);
+  // Pay runs, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date) }
+  function payRuns(all) {
+    const m = new Map(); all.filter(x => x.p.run).forEach(x => { if (!m.has(x.p.run)) m.set(x.p.run, []); m.get(x.p.run).push(x); });
+    return [...m].map(([name, xs]) => { const reg = xs.filter(x => !x.p.extra); const ds = (reg.length ? reg : xs).map(x => x.p.date).filter(Boolean).sort(); return { name, all: xs, xs: reg, date: ds[Math.floor(ds.length / 2)] || '' }; })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
+  // The next payroll: two weeks after the latest one
+  function nextPayroll(all) {
+    const last = payRuns(all).find(r => periodDates(r.name, r.date)); if (!last) return null;
+    const pd = periodDates(last.name, last.date), s = D.addDays(pd.end, 1), e = D.addDays(pd.end, 14);
+    return { from: last.name, name: periodLabel(s, e), date: D.toISO(D.addDays(D.fromISO(last.date), 14)) };
+  }
   function renderPayments() {
     const title = 'Payments';
     if (!vault.key) return { title, sub: 'Locked', actions: '', html: '<div class="empty"><strong>Payments are locked</strong>They’re scrambled with your passphrase, so only you can read them.<div style="margin-top:14px"><button type="button" class="chipbtn solid" data-payunlock="1">' + I.lock + (vaultItem() ? 'Unlock' : 'Choose a passphrase') + '</button></div></div>' };
@@ -2870,123 +2910,197 @@
     const tab = ui.payTab || 'topay'; if (!ui.paySel) ui.paySel = new Set();
     const n = { topay: payFilter('topay', all).length, chase: payFilter('chase', all).length };
     let html = '<div class="ntabs" role="tablist">' + payTabs.map(([k, l]) => '<button type="button" role="tab" class="ntab" data-paytab="' + k + '" aria-selected="' + (tab === k) + '">' + l + (n[k] ? ' <span class="cnt">' + n[k] + '</span>' : '') + '</button>').join('') + '</div>';
-    html += '<div class="pbar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payrun="">' + I.plus + 'Pay run</button><span class="spacer"></span>' +
-      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
-      (tab !== 'runs' ? '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Name, Site, Description, In, Out, Balance, Notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button>' : '') + '</div>';
+    html += '<div class="pbar"><button type="button" class="chipbtn solid" data-paynew="1">' + I.plus + 'Payment</button><button type="button" class="chipbtn" data-payimport="1">Import from sheet</button><span class="spacer"></span>' +
+      (ui.paySel.size ? '<span class="hint">' + ui.paySel.size + ' selected</span><button type="button" class="chipbtn" data-paystatus="ok">Approve</button><button type="button" class="chipbtn" data-paystatus="paid">Mark paid</button><button type="button" class="chipbtn" data-paysel-clear="1">Clear</button>' : '') +
+      (tab !== 'runs' ? '<button type="button" class="chipbtn" data-paycopy="' + (ui.paySel.size ? 'sel' : tab) + '" title="Copies rows in your sheet’s columns: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes">Copy for Excel' + (ui.paySel.size ? ' (' + ui.paySel.size + ')' : '') + '</button>' : '') + '</div>';
     if (tab === 'runs') {
-      const runs = new Map(); all.filter(x => x.p.run).forEach(x => { if (!runs.has(x.p.run)) runs.set(x.p.run, []); runs.get(x.p.run).push(x); });
-      if (!runs.size) html += empty('No pay runs yet', 'Click “+ Pay run” and paste the names and amounts from Excel. Next time, open the run and click Repeat.');
-      runs.forEach((xs, name) => {
-        const open = ui.payOpen === name, paid = xs.filter(x => x.p.status === 'paid').length, bad = xs.filter(x => x.p.failed).length;
-        html += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(name) + '">' + I.chev + '<span class="pwho">' + esc(name) + '</span><span class="psub">' + esc(payDate(xs[0].p.date)) + ' · ' + xs.length + ' people · ' + paid + ' paid' + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(xs)) + '</span></button>' +
-          (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn" data-payrunall="' + esc(name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(name) + '">Copy for Excel</button><button type="button" class="chipbtn" data-payrun="' + esc(name) + '">Repeat…</button></div><div class="plist">' + xs.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
+      const runs = payRuns(all), nx = nextPayroll(all);
+      if (nx && !runs.some(r => r.name === nx.name)) html += '<div class="pnext"><div><b>Next payroll: ' + esc(nx.name) + '</b><span class="psub">Pay date about ' + esc(payDate(nx.date)) + ' · same people and amounts as ' + esc(nx.from) + ', plus anything that didn’t go through</span></div><button type="button" class="chipbtn solid" data-payrun="' + esc(nx.from) + '">Set it up</button></div>';
+      html += '<div class="pbar"><button type="button" class="chipbtn" data-payrun="">' + I.plus + 'Payroll from scratch</button></div>';
+      if (!runs.length) html += empty('No payroll yet', 'Copy your last payroll rows from the sheet (Date to notes), click “Payroll from scratch” and paste. After that, Tally sets up each next payroll for you.');
+      runs.forEach(r => {
+        const open = ui.payOpen === r.name, paid = r.all.filter(x => x.p.status === 'paid' && !x.p.failed).length, bad = r.all.filter(x => x.p.failed && !x.p.redone).length, added = r.all.length - r.xs.length;
+        html += '<div class="prun' + (open ? ' open' : '') + '"><button type="button" class="prun-head" data-payopen="' + esc(r.name) + '">' + I.chev + '<span class="pwho">' + esc(r.name) + '</span><span class="psub">Paid ' + esc(payDate(r.date)) + ' · ' + r.xs.length + ' people' + (added ? ' + ' + added + ' added' : '') + ' · ' + paid + ' paid' + (bad ? ' · <b class="badtxt">' + bad + ' didn’t go through</b>' : '') + '</span><span class="pamt">' + money(payTotal(r.all)) + '</span></button>' +
+          (open ? '<div class="prun-acts"><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="ok">Approve all</button><button type="button" class="chipbtn" data-payrunall="' + esc(r.name) + '" data-to="paid">Mark all paid</button><button type="button" class="chipbtn" data-paycopy="run" data-name="' + esc(r.name) + '">Copy for Excel</button><button type="button" class="chipbtn" data-payrun="' + esc(r.name) + '">Repeat…</button></div><div class="plist">' + r.all.map(x => payRow(x, { why: true })).join('') + '</div>' : '') + '</div>';
       });
     } else {
       let xs = payFilter(tab, all);
-      if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, site, description or amount" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.ref, x.p.run, x.p.note, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
-      if (xs.length) html += '<div class="plist">' + xs.map(x => payRow(x, tab === 'chase' || tab === 'all' ? { why: true } : null)).join('') + '</div><div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · total AED ' + money(payTotal(xs)) + '</div>';
-      else html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests and approved payments show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “+ Payment” to add one.' }[tab]);
+      if (tab === 'all') { html += '<input class="ctl pfind" id="payFind" placeholder="Filter by name, project, description or amount" value="' + esc(ui.payFind || '') + '" aria-label="Filter payments">'; const q = (ui.payFind || '').toLowerCase().trim(); if (q) xs = xs.filter(x => [x.p.payee, x.p.site, x.p.what, x.p.check, x.p.run, x.p.note, x.p.chase, money(x.p.amount), String(x.p.amount)].join(' ').toLowerCase().includes(q)); }
+      const lim = tab === 'all' ? (ui.payLimit || 200) : Infinity;
+      if (xs.length) html += '<div class="plist">' + xs.slice(0, lim).map(x => payRow(x, { why: true })).join('') + '</div>' + (xs.length > lim ? '<div class="more-wrap"><button type="button" class="chipbtn" data-paymore="1">Show older</button></div>' : '') + '<div class="ptotal">' + xs.length + ' payment' + (xs.length === 1 ? '' : 's') + ' · net out AED ' + money(payTotal(xs)) + '</div>';
+      else html += empty({ topay: 'Nothing waiting to be paid', chase: 'Nothing to chase', all: all.length ? 'No matches' : 'No payments yet' }[tab], { topay: 'New requests, Pending and Due items show up here.', chase: 'Missing receipts, transfers that didn’t go through and anything you’re following up show up here.', all: all.length ? 'Try a different word.' : 'Click “Import from sheet” to bring in rows from your Excel, or “+ Payment” to add one.' }[tab]);
     }
     const toPay = payFilter('topay', all);
-    return { title, sub: toPay.length ? toPay.length + ' to pay · AED ' + money(payTotal(toPay)) : 'All paid', html, actions: lockBtn() };
+    return { title, sub: toPay.length ? toPay.length + ' to pay · AED ' + money(payTotal(toPay)) : 'Nothing to pay', html, actions: lockBtn() };
   }
-  // Copy for Excel: the sheet's own columns, in order: Date, Name, Site, Description, In, Out, Balance, Notes.
-  // Balance is a formula that works on whatever row it's pasted into: the row above + In - Out.
+  // Copy for Excel: the sheet's columns, in order: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
+  // Balance is a formula that works on whatever row it's pasted into: the row above + Deposit - Check.
+  // A transfer that didn't go through is written the sheet's way: the amount as both Deposit and Check, with a note.
   const XL_BAL = '=INDIRECT("R[-1]C",FALSE)+N(INDIRECT("RC[-2]",FALSE))-N(INDIRECT("RC[-1]",FALSE))';
   function payXlRow(p) {
-    const notes = chaseWhy(p).concat(p.note ? [p.note] : []).join('; ');
-    return [xlDate(p.date), p.payee, p.site, p.what, p.dir === 'in' ? p.amount : '', p.dir === 'in' ? '' : p.amount, XL_BAL, notes].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
+    const notes = [], add = s => { if (s && !notes.some(n => n.toLowerCase().includes(s.toLowerCase()))) notes.push(s); };
+    add(p.note); if (p.failed) add('payment did not go through'); if (p.receipt === 'no') add('Need receipt'); add(p.chase);
+    const dep = p.dir === 'in' || p.failed || p.twice ? p.amount : '', chk = p.dir === 'in' ? '' : p.amount;
+    return [xlDate(p.date), p.payee, p.check, p.site, p.what, dep, chk, XL_BAL, notes.join('; ')].map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t');
   }
   function payCopy(xs) {
     const rows = xs.slice().sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || (a.t.createdAt - b.t.createdAt)).map(x => payXlRow(x.p));
-    const txt = rows.join('\r\n');
+    if (!rows.length) { toast('Nothing to copy'); return; }
     const done = () => toast(rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' copied. In Excel, click the Date cell of the first empty row and press Ctrl+V.');
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, () => toast('Couldn’t copy. Try again.')); else toast('Copying isn’t available here.');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(rows.join('\r\n')).then(done, () => toast('Couldn’t copy. Try again.')); else toast('Copying isn’t available here.');
   }
   const siteList = () => [...new Set(pays().map(x => x.p.site).filter(Boolean))].sort();
   function openPayForm(id) {
-    const raw = id && taskById(id), p = raw ? payOf(raw) : { date: todayISO(), payee: '', site: '', what: '', amount: '', dir: 'out', status: 'req', receipt: 'yes', ref: '', run: '', failed: false, chase: '', note: '' };
+    const raw = id && taskById(id), p = raw ? payOf(raw) : Object.assign(BLANK_PAY(), { amount: '' });
     if (!p) return;
     const opt = (list, v) => list.map(([k, l]) => '<option value="' + k + '"' + (v === k ? ' selected' : '') + '>' + l + '</option>').join('');
     const f = (key, label, inner) => '<div class="field"><label for="pf_' + key + '">' + label + '</label>' + inner + '</div>';
     const inp = (key, label, attrs) => f(key, label, '<input class="ctl" id="pf_' + key + '" value="' + esc(p[key] == null ? '' : p[key]) + '" ' + (attrs || '') + '>');
     $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="pfTitle"><div class="sheet-head"><h2 id="pfTitle">' + (raw ? 'Payment' : 'New payment') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body pform" data-payid="' + (raw ? raw.id : '') + '">' +
       '<datalist id="pfSites">' + siteList().map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
-      '<div class="pgrid">' + inp('payee', 'Paid to', 'autocomplete="off"') + inp('amount', 'Amount (AED)', 'inputmode="decimal" autocomplete="off"') +
-      f('date', 'Date', '<input class="ctl" type="date" id="pf_date" value="' + esc(p.date || '') + '">') + f('dir', 'Money', '<select class="ctl" id="pf_dir">' + opt([['out', 'Going out'], ['in', 'Coming in']], p.dir) + '</select>') +
-      inp('site', 'Site', 'list="pfSites" autocomplete="off" placeholder="e.g. Head office"') + inp('what', 'Description', 'autocomplete="off" placeholder="October 11 to 24"') +
-      f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') +
-      inp('ref', 'Bank reference or cheque no.', 'autocomplete="off"') + inp('run', 'Pay run', 'autocomplete="off" placeholder="Leave empty if not part of a run"') + '</div>' +
+      '<div class="pgrid">' + inp('payee', 'Vendor / Customer', 'autocomplete="off"') + inp('amount', 'Amount (AED)', 'inputmode="decimal" autocomplete="off"') +
+      f('date', 'Date', '<input class="ctl" type="date" id="pf_date" value="' + esc(p.date || '') + '">') + f('dir', 'Column', '<select class="ctl" id="pf_dir">' + opt([['out', 'Check (money out)'], ['in', 'Deposit (money in)']], p.dir) + '</select>') +
+      inp('site', 'Project', 'list="pfSites" autocomplete="off"') + inp('check', 'Check #', 'autocomplete="off"') + '</div>' +
+      inp('what', 'Description / Invoice #', 'autocomplete="off"') +
+      '<div class="pgrid">' + f('status', 'Status', '<select class="ctl" id="pf_status">' + opt(PAY_ST, p.status) + '</select>') + f('receipt', 'Receipt', '<select class="ctl" id="pf_receipt">' + opt([['yes', 'Have it'], ['no', 'Missing'], ['na', 'Not needed']], p.receipt) + '</select>') +
+      inp('run', 'Payroll', 'autocomplete="off" placeholder="Leave empty if not payroll"') + '<div></div></div>' +
       '<label class="pcheck"><input type="checkbox" id="pf_failed"' + (p.failed ? ' checked' : '') + '> The transfer didn’t go through</label>' +
-      inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paid short by one day, top up 296.70"') +
-      f('note', 'Note', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
+      (p.failed ? '<label class="pcheck"><input type="checkbox" id="pf_redone"' + (p.redone ? ' checked' : '') + '> Paid again since</label>' : '') +
+      inp('chase', 'Follow up on', 'autocomplete="off" placeholder="e.g. paycheck short by one day"') +
+      f('note', 'Notes (copied to the sheet)', '<textarea class="ctl" id="pf_note" rows="2">' + esc(p.note || '') + '</textarea>') +
       '<div class="pform-acts"><button type="button" class="chipbtn solid" data-paysave="1">Save</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="pfMsg"></span><span class="spacer"></span>' + (raw ? '<button type="button" class="danger-btn" data-paydel="' + raw.id + '">Delete</button>' : '') + '</div></div></div>';
     $('#sheet').hidden = false; setTimeout(() => $('#pf_payee') && $('#pf_payee').focus(), 30);
   }
   async function savePayForm() {
     const form = $('.pform'); if (!form) return;
     const v = k => $('#pf_' + k).value.trim(), amt = toNum(v('amount'));
-    if (!v('payee')) { $('#pfMsg').textContent = 'Who was it paid to?'; return; }
+    if (!v('payee') && !v('what')) { $('#pfMsg').textContent = 'Add who it’s for or a description.'; return; }
     if (!isFinite(amt) || amt <= 0) { $('#pfMsg').textContent = 'Type the amount, like 1500.00'; return; }
     if (!vault.key && !(await needVault())) return;
-    const fields = { date: v('date') || todayISO(), payee: v('payee'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), ref: v('ref'), run: v('run'), failed: $('#pf_failed').checked, chase: v('chase'), note: v('note') };
+    const fields = { date: v('date') || todayISO(), payee: v('payee'), check: v('check'), site: v('site'), what: v('what'), amount: amt, dir: v('dir'), status: v('status'), receipt: v('receipt'), run: v('run'), failed: $('#pf_failed').checked, redone: !!($('#pf_redone') && $('#pf_redone').checked), chase: v('chase'), note: v('note') };
     snapshot();
     const raw = form.dataset.payid && taskById(form.dataset.payid);
     if (raw) Object.assign(payOf(raw), fields); else await addPayment(fields);
     save(); closeSheet(); render(); toast(raw ? 'Payment saved' : 'Payment added', true);
   }
-  // Paste from Excel: one person per line. Name first, amount = the last number on the line, site = a cell in between (optional).
-  function parseRunLines(text, site) {
-    return String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
-      const cells = l.split(/\t|\s{2,}|,(?=\s*[A-Za-z])|;/).map(c => c.trim()).filter(Boolean);
-      let ai = -1; for (let i = cells.length - 1; i > 0; i--) if (/^-?[\d,]+(\.\d+)?$/.test(cells[i].replace(/^AED\s*/i, ''))) { ai = i; break; }
-      if (ai < 0) return { bad: l };
-      const mid = cells.slice(1, ai).filter(c => !/^-?[\d,]+(\.\d+)?$/.test(c));
-      return { payee: cells[0], amount: toNum(cells[ai]), site: mid[0] || site || '' };
+  // Payroll lines: Name, Project, Amount, then an optional description (for added lines).
+  // Rows copied straight from the sheet (Date … notes) work too.
+  function parseRunLines(text) {
+    return String(text || '').split(/\r?\n/).filter(l => l.trim()).map(l => {
+      const raw = l.split('\t');
+      if (raw.length >= 7 && (isAmt(raw[6]) || isAmt(raw[5]))) return { payee: raw[1].trim(), site: (raw[3] || '').trim(), what: (raw[4] || '').trim(), amount: toNum(isAmt(raw[6]) ? raw[6] : raw[5]), sheet: true };
+      const cells = (raw.length > 1 ? raw : /\s{2,}/.test(l.trim()) ? l.split(/\s{2,}/) : l.split(',')).map(c => c.trim());
+      let ai = -1; for (let i = 1; i < cells.length; i++) if (isAmt(cells[i])) { ai = i; break; }
+      if (ai < 0) return { bad: l.trim() };
+      return { payee: cells[0], site: cells.slice(1, ai).filter(Boolean)[0] || '', amount: toNum(cells[ai]), what: cells.slice(ai + 1).filter(Boolean).join(' ') };
     });
   }
   function openRunForm(from) {
-    const src = from ? pays().filter(x => x.p.run === from) : [];
-    const lines = src.map(x => x.p.payee + '\t' + x.p.site + '\t' + x.p.amount).join('\n');
-    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="prTitle"><div class="sheet-head"><h2 id="prTitle">' + (from ? 'Repeat pay run' : 'New pay run') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
-      (from ? '<p>Copied from “' + esc(from) + '”. Change the name and date, and fix any amounts.</p>' : '<p>Paste from Excel: copy the Name, Site and Amount columns, then paste below. One person per line.</p>') +
-      '<div class="pgrid"><div class="field"><label for="pr_name">Name of the run</label><input class="ctl" id="pr_name" placeholder="October 25 to November 7" autocomplete="off"></div><div class="field"><label for="pr_date">Date</label><input class="ctl" type="date" id="pr_date" value="' + todayISO() + '"></div></div>' +
-      '<div class="field"><label for="pr_lines">People and amounts</label><textarea class="ctl" id="pr_lines" rows="10" placeholder="Jane Doe\tHead office\t1500.00">' + esc(lines) + '</textarea></div>' +
+    const all = pays(), nx = from ? nextPayroll(all) : null, src = from ? all.filter(x => x.p.run === from && !x.p.extra) : [];
+    const name = from ? (nx && nx.from === from ? nx.name : (() => { const r = payRuns(all).find(r => r.name === from), pd = r && periodDates(r.name, r.date); return pd ? periodLabel(D.addDays(pd.end, 1), D.addDays(pd.end, 14)) : ''; })()) : '';
+    const r0 = from && payRuns(all).find(r => r.name === from), date = r0 && r0.date ? D.toISO(D.addDays(D.fromISO(r0.date), 14)) : todayISO();
+    // anything from any payroll that didn't go through and hasn't been paid again
+    const carry = from ? all.filter(x => x.p.run && x.p.failed && !x.p.redone) : [];
+    ui.runCarry = carry.map(x => x.t.id);
+    const lines = src.map(x => [x.p.payee, x.p.site, x.p.amount.toFixed(2)].join('\t')).concat(carry.map(x => [x.p.payee, x.p.site, x.p.amount.toFixed(2), (x.p.what || x.p.run) + ', ' + payDate(x.p.date) + ' payment did not go through'].join('\t'))).join('\n');
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="prTitle"><div class="sheet-head"><h2 id="prTitle">' + (from ? 'Next payroll' : 'Payroll') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
+      (from ? '<p>Same people and amounts as “' + esc(from) + '”' + (carry.length ? ', plus <b>' + carry.length + ' that didn’t go through</b> (at the bottom)' : '') + '. Change any amount, delete a line, or add a line for an expense or a missed payment: <i>Name, Project, Amount, what it’s for</i>, separated by Tab or commas.</p>'
+        : '<p>In your sheet, select the rows of your last payroll (from Date to notes), copy, and paste below. Or type one person per line: <i>Name, Project, Amount</i>, separated by Tab or commas.</p>') +
+      '<div class="pgrid"><div class="field"><label for="pr_name">Pay period</label><input class="ctl" id="pr_name" placeholder="Nov 8 to Nov 21" value="' + esc(name) + '" autocomplete="off"></div><div class="field"><label for="pr_date">Pay date</label><input class="ctl" type="date" id="pr_date" value="' + date + '"></div></div>' +
+      '<div class="field"><label for="pr_lines">People and amounts</label><textarea class="ctl" id="pr_lines" rows="12" placeholder="Jane Doe\tHead office\t1500.00">' + esc(lines) + '</textarea></div>' +
       '<p class="hint" id="prSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payrunsave="1">Add to To pay</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="prMsg"></span></div></div></div>';
-    $('#sheet').hidden = false; runSum(); setTimeout(() => $('#pr_name') && $('#pr_name').focus(), 30);
+    $('#sheet').hidden = false; runSum(); setTimeout(() => $(name ? '#pr_lines' : '#pr_name') && $(name ? '#pr_lines' : '#pr_name').focus(), 30);
   }
   function runSum() {
     const el = $('#prSum'); if (!el) return;
     const rows = parseRunLines($('#pr_lines').value), ok = rows.filter(r => !r.bad), bad = rows.filter(r => r.bad);
-    el.innerHTML = ok.length ? ok.length + ' people · total AED ' + money(ok.reduce((s, r) => s + r.amount, 0)) + (bad.length ? ' · <b class="badtxt">' + bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' without an amount: ' + bad.map(b => esc(b.bad)).join(', ') + '</b>' : '') : '';
+    if (!$('#pr_name').value.trim() && ok.length && ok[0].sheet) { const pt = periodText(ok[0].what); if (pt) $('#pr_name').value = pt; }
+    el.innerHTML = ok.length ? ok.length + ' line' + (ok.length === 1 ? '' : 's') + ' · total AED ' + money(ok.reduce((s, r) => s + r.amount, 0)) + (bad.length ? ' · <b class="badtxt">' + bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' without an amount: ' + bad.map(b => esc(b.bad)).join(', ') + '</b>' : '') : '';
   }
   async function saveRunForm() {
     const name = $('#pr_name').value.trim(), date = $('#pr_date').value || todayISO(), rows = parseRunLines($('#pr_lines').value);
-    if (!name) { $('#prMsg').textContent = 'Give the run a name, like the pay period.'; return; }
-    if (pays().some(x => x.p.run === name)) { $('#prMsg').textContent = 'There’s already a run with that name.'; return; }
+    if (!name) { $('#prMsg').textContent = 'Type the pay period, like Nov 8 to Nov 21.'; return; }
+    if (pays().some(x => x.p.run === name)) { $('#prMsg').textContent = 'There’s already a payroll with that name.'; return; }
     if (!rows.length || rows.some(r => r.bad)) { $('#prMsg').textContent = rows.length ? 'Fix the lines without an amount first.' : 'Paste at least one person.'; return; }
     if (!vault.key && !(await needVault())) return;
     snapshot();
-    for (const r of rows) await addPayment({ date, payee: r.payee, site: r.site, what: name, amount: r.amount, run: name });
+    for (const r of rows) { const extra = !!(r.what && r.what !== name && !(r.sheet && periodText(r.what))); await addPayment({ date, payee: r.payee, site: r.site, what: extra || r.sheet ? r.what || name : name, amount: r.amount, run: name, extra }); }
+    (ui.runCarry || []).forEach(id => { const t = taskById(id), p = t && payOf(t); if (p && rows.some(r => r.payee === p.payee && Math.abs(r.amount - p.amount) < 0.01)) p.redone = true; }); ui.runCarry = null;
     save(); closeSheet(); ui.payTab = 'runs'; ui.payOpen = name; render(); toast(rows.length + ' payments added', true);
+  }
+  // Import rows copied from the sheet: Date, Vendor/Customer, Check #, Project, Description, Deposit, Check, Balance, notes.
+  // Blank dates carry down from the row above (as in the sheet). "Pending" or "Due" rows become To pay; the rest are already paid.
+  function parseSheetRows(text) {
+    const out = []; let lastDate = null, lastVendor = '', ctx = null; out.skipped = 0;
+    String(text || '').split(/\r?\n/).forEach(line => {
+      if (!line.trim()) return;
+      const c = line.split('\t').map(x => x.trim());
+      if (/^date$/i.test(c[0])) return; // header
+      const dt = sheetDate(c[0]);
+      if (c[0]) { ctx = dt ? 'date' : /^(pending|due)\b/i.test(c[0]) ? 'pend' : 'skip'; if (dt) lastDate = dt; } // a month heading like "SEP" starts a forecast: skipped
+      const pending = ctx === 'pend';
+      if (!ctx || ctx === 'skip') { if (isAmt(c[5]) || isAmt(c[6])) out.skipped++; return; }
+      const vendor = c[1] || (!c[0] && lastVendor ? lastVendor : ''); if (c[1]) lastVendor = c[1]; else if (c[0]) lastVendor = '';
+      const dep = isAmt(c[5]) ? toNum(c[5]) : NaN, chk = isAmt(c[6]) ? toNum(c[6]) : NaN, note = c[8] || '';
+      if (!(dep > 0) && !(chk > 0)) return;
+      const failed = dep > 0 && chk > 0 && Math.abs(dep - chk) < 0.01 && /not go through|didn.?t go through|did not go/i.test(note);
+      const same = dep > 0 && chk > 0 && !failed && Math.abs(dep - chk) < 0.01, both = dep > 0 && chk > 0 && !failed && !same;
+      const desc = c[4] || '', isRun = !!(c[3] && periodText(desc));
+      out.push({ date: (pending ? todayISO() : dt || lastDate || todayISO()), payee: vendor, check: c[2] || '', site: c[3] || '', what: desc, amount: both ? Math.abs(Math.round((chk - dep) * 100) / 100) : (chk > 0 ? chk : dep), twice: same, dir: (chk > 0 && !(both && dep > chk)) ? 'out' : 'in',
+        status: pending ? 'req' : 'paid', receipt: /need receipt/i.test(note) ? 'no' : 'yes', failed, note: note.replace(/need receipt/i, '').replace(/^[\s;,.-]+|[\s;,.-]+$/g, '') + (pending && c[0] ? (note ? '; ' : '') + c[0] : ''), run: isRun ? periodText(desc) : '' });
+    });
+    // One payroll per pay date: rows paid that day for another period (a missed payment paid late) are added lines.
+    const byDate = {}; out.filter(r => r.run).forEach(r => { (byDate[r.date] = byDate[r.date] || {})[r.run] = ((byDate[r.date] || {})[r.run] || 0) + 1; });
+    out.filter(r => r.run).forEach(r => { const m = Object.entries(byDate[r.date]).sort((a, b) => b[1] - a[1])[0][0]; if (r.run === m) return; const a = periodDates(r.run, r.date), z = periodDates(m, r.date); if (!(a && z && a.end.getTime() === z.end.getTime())) r.extra = true; r.run = m; });
+    // a payroll's main pay date is the one with the most people; lines paid on other days (a top-up a week later) are added lines
+    const runDay = {}; out.filter(r => r.run).forEach(r => { const k = r.run; runDay[k] = runDay[k] || {}; runDay[k][r.date] = (runDay[k][r.date] || 0) + 1; });
+    out.filter(r => r.run && !r.extra).forEach(r => { const main = Object.entries(runDay[r.run]).sort((a, b) => b[1] - a[1])[0][0]; if (r.date !== main) r.extra = true; });
+    // a failed transfer that was paid again further down is done
+    out.forEach(r => { if (r.failed && out.some(o => o !== r && !o.failed && o.payee === r.payee && Math.abs(o.amount - r.amount) < 0.01 && o.date >= r.date)) r.redone = true; });
+    return out;
+  }
+  const payKey = p => [p.date, p.payee, p.what, money(p.amount), p.dir].join('|').toLowerCase();
+  function openImport() {
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="piTitle"><div class="sheet-head"><h2 id="piTitle">Import from your sheet</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body prform">' +
+      '<ol class="howto"><li>In Excel, select rows from the <b>Date</b> column across to the <b>notes</b> column (A to I).</li><li>Press <b>Ctrl+C</b>.</li><li>Click the box below and press <b>Ctrl+V</b>.</li></ol>' +
+      '<p class="hint">Rows marked Pending or Due go to To pay. Everything else comes in as already paid. Rows already in Tally are skipped, so pasting the same rows twice is safe. The data is scrambled on this device before it syncs.</p>' +
+      '<div class="field"><label for="pi_rows">Rows from the sheet</label><textarea class="ctl" id="pi_rows" rows="10"></textarea></div>' +
+      '<p class="hint" id="piSum"></p><div class="pform-acts"><button type="button" class="chipbtn solid" data-payimportgo="1">Import</button><button type="button" class="chipbtn" data-close="1">Cancel</button><span class="hint" id="piMsg"></span></div></div></div>';
+    $('#sheet').hidden = false; setTimeout(() => $('#pi_rows') && $('#pi_rows').focus(), 30);
+  }
+  function importSum() {
+    const el = $('#piSum'); if (!el) return;
+    const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value), fresh = rows.filter(r => !have.has(payKey(r)));
+    const runs = new Set(fresh.filter(r => r.run).map(r => r.run)).size, tp = fresh.filter(r => r.status === 'req').length, bad = fresh.filter(r => r.failed && !r.redone).length;
+    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (no date above them, or a forecast section)' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
+  }
+  async function saveImport() {
+    const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value).filter(r => !have.has(payKey(r)));
+    if (!rows.length) { $('#piMsg').textContent = 'Nothing new to import.'; return; }
+    if (!vault.key && !(await needVault())) return;
+    $('#piMsg').textContent = 'Importing…'; snapshot();
+    for (const r of rows) await addPayment(r);
+    save(); closeSheet(); ui.payTab = 'all'; render(); toast(rows.length + ' rows imported', true);
   }
   function bindPay() {
     if (!PAY_ON) return;
     const go = () => needVault().then(ok => { if (ok) render(); });
     $('#content').addEventListener('click', e => {
       if (ui.view !== 'payments') return;
-      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payrun],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall]'); if (!b) return;
+      const b = e.target.closest('[data-payunlock],[data-paytab],[data-paynew],[data-payimport],[data-payrun],[data-payedit],[data-paynext],[data-paysel],[data-paysel-clear],[data-paystatus],[data-paycopy],[data-payopen],[data-payrunall],[data-paymore]'); if (!b) return;
       const d = b.dataset;
       if (d.payunlock) return go();
       if (!vault.key) return go();
       if (d.paytab) { ui.payTab = d.paytab; ui.paySel = new Set(); renderMain(); return; }
       if (d.paynew) return openPayForm(null);
+      if (d.payimport) return openImport();
       if (d.payrun !== undefined) return openRunForm(d.payrun || null);
       if (d.payedit) return openPayForm(d.payedit);
       if (d.paysel) { b.checked ? ui.paySel.add(d.paysel) : ui.paySel.delete(d.paysel); renderMain(); return; }
       if (d.payselClear) { ui.paySel = new Set(); renderMain(); return; }
+      if (d.paymore) { ui.payLimit = (ui.payLimit || 200) + 300; renderMain(); return; }
       if (d.payopen) { ui.payOpen = ui.payOpen === d.payopen ? null : d.payopen; renderMain(); return; }
-      const set = (xs, st) => { snapshot(); xs.forEach(x => { x.p.status = st; if (st === 'paid') x.p.failed = false; }); save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
+      const set = (xs, st) => { if (!xs.length) return; snapshot(); xs.forEach(x => { x.p.status = st; }); save(); render(); toast(xs.length + ' marked ' + PAY_NAME[st], true); };
       if (d.paynext) { const t = taskById(d.paynext), p = t && payOf(t); if (p) set([{ p }], { req: 'ok', ok: 'paid' }[p.status]); return; }
       if (d.paystatus) { set(pays().filter(x => ui.paySel.has(x.t.id)), d.paystatus); ui.paySel = new Set(); renderMain(); return; }
       if (d.payrunall) { set(pays().filter(x => x.p.run === d.payrunall && !x.p.failed && x.p.status !== 'paid' && (d.to !== 'ok' || x.p.status === 'req')), d.to); return; }
@@ -2996,14 +3110,18 @@
     $('#sheet').addEventListener('click', e => {
       if (e.target.closest('[data-paysave]')) { savePayForm(); return; }
       if (e.target.closest('[data-payrunsave]')) { saveRunForm(); return; }
+      if (e.target.closest('[data-payimportgo]')) { saveImport(); return; }
       const del = e.target.closest('[data-paydel]');
       if (del) {
         if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Click again to delete'; return; }
         const t = taskById(del.dataset.paydel); if (t) { snapshot(); trashTask(t); save(); } closeSheet(); render(); toast('Payment moved to Recently deleted', true);
       }
     });
-    $('#sheet').addEventListener('input', e => { if (e.target.id === 'pr_lines') runSum(); });
-    $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.pform input')) { e.preventDefault(); savePayForm(); } });
+    $('#sheet').addEventListener('input', e => { if (e.target.id === 'pr_lines') runSum(); if (e.target.id === 'pi_rows') importSum(); });
+    $('#sheet').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.target.matches('.pform input')) { e.preventDefault(); savePayForm(); }
+      if (e.key === 'Tab' && !e.shiftKey && e.target.id === 'pr_lines') { e.preventDefault(); e.target.setRangeText('\t', e.target.selectionStart, e.target.selectionEnd, 'end'); runSum(); } // Tab separates columns in the payroll box
+    });
   }
 
   // ---- local file store (IndexedDB): originals + previews; synced to Supabase Storage when signed in
