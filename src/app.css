@@ -1331,3 +1331,23 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
 .bcfile { cursor: pointer; }
 details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
 .bform .plist { max-width: none; }
+
+/* Spending: 8 categories use the validated categorical order (slots 1-8) */
+.fcdash { --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647; }
+:root[data-theme="dark"] .fcdash, :root[data-theme="dark"] .spt { --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fcdash, :root:not([data-theme="light"]) .spt { --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; } }
+.spt { --s1: #257de0; --s2: #f47230; --s3: #00b894; --s4: #f2a600; --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647; }
+:root[data-theme="dark"] .spt { --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .spt { --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05; } }
+.fcsvg .s1 { fill: var(--s1); } .fcsvg .s2 { fill: var(--s2); } .fcsvg .s3 { fill: var(--s3); } .fcsvg .s4 { fill: var(--s4); } .fcsvg .s5 { fill: var(--s5); } .fcsvg .s6 { fill: var(--s6); } .fcsvg .s7 { fill: var(--s7); } .fcsvg .s8 { fill: var(--s8); }
+.fclegend .s1, .spt .s1 { background: var(--s1); } .fclegend .s2, .spt .s2 { background: var(--s2); } .fclegend .s3, .spt .s3 { background: var(--s3); } .fclegend .s4, .spt .s4 { background: var(--s4); }
+.fclegend .s5, .spt .s5 { background: var(--s5); } .fclegend .s6, .spt .s6 { background: var(--s6); } .fclegend .s7, .spt .s7 { background: var(--s7); } .fclegend .s8, .spt .s8 { background: var(--s8); }
+.spdash { grid-template-columns: 1fr; }
+.spt { width: 100%; max-width: var(--payw); }
+.spt tbody tr[data-spendopen] { cursor: pointer; } .spt tbody tr[data-spendopen]:hover { background: var(--hover); }
+.spt .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+.spbar { display: inline-block; width: 80px; height: 6px; margin-right: 8px; border-radius: 3px; background: color-mix(in srgb, var(--line) 70%, transparent); vertical-align: middle; overflow: hidden; }
+.spbar i { display: block; height: 100%; border-radius: 3px; }
+.spt .phist .plist { max-width: none; margin: 4px 0; }
+.pbal label { font-size: 13px; }
+.fctip[hidden] { display: none; }
