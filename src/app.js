@@ -333,6 +333,7 @@
   /* ---------- recycle bin ---------- */
   const TRASH_DAYS = 30;
   function trashTask(t, withList) {
+    clearReminder(t);
     S.tasks = S.tasks.filter(x => x.id !== t.id);
     t.deletedAt = Date.now(); t.deletedWithList = withList || null;
     S.trash.tasks.push(t);
@@ -380,6 +381,7 @@
   // Marks a task done, or moves a repeating task to its next date. Returns the next date for repeats.
   function finishTask(t) {
     if (t.type) return null;
+    clearReminder(t);
     if (!t.recur) { t.done = true; t.doneAt = Date.now(); return null; }
     t.completions = (t.completions || []).concat([{ at: Date.now(), due: t.due }]).slice(-60);
     const next = D.nextOccurrence(t.due, t.recur);
@@ -1400,7 +1402,7 @@
         const body = isWaiting(t) && nudgeRem(t) ? 'Waiting on ' + t.waiting.who + ' since ' + shortDate(t.waiting.since) + '. Time to follow up.' : t.expFor && t.due ? (t.due === todayISO() ? 'Expires today' : 'Expires ' + D.dueLabel(t.due) + ' (' + D.diffDays(D.fromISO(t.due), D.fromISO(todayISO())) + ' days)') : (t.due ? (isEvent(t) ? '' : 'Due ') + D.dueLabel(t.due) + (t.time ? ' ' + D.fmtTime(t.time) : '') : 'Reminder') + (S.lists.length > 1 ? ' · ' + ((listById(t.listId) || {}).name || '') : '');
         const plain = () => { const n = new Notification(plainLinks(t.title), { body, tag: t.id }); n.onclick = () => { window.focus(); ui.selected = t.id; render(); }; };
         // Phones only allow notifications through the service worker; the same tag means a push for this reminder is replaced, not doubled
-        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id } })).catch(() => { try { plain(); } catch (e) { } });
+        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id, at: t.remindedFor || null } })).catch(() => { try { plain(); } catch (e) { } });
         else plain();
       }
     } catch (e) { }
@@ -1408,6 +1410,28 @@
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       [660, 880].forEach((f, i) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.connect(g); g.connect(ctx.destination); const st = ctx.currentTime + i * 0.18; g.gain.setValueAtTime(0.0001, st); g.gain.exponentialRampToValueAtTime(0.08, st + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, st + 0.35); o.start(st); o.stop(st + 0.4); });
     } catch (e) { }
+  }
+  // A reminder was dealt with here (completed, deleted, snoozed, dismissed): take its notification away on this
+  // device, and if it went off in the last 12 hours, ask the server to clear it on your other devices too.
+  function clearReminder(t) {
+    if (!t || !t.id) return;
+    const i = alarmQueue.indexOf(t.id); if (i >= 0) { alarmQueue.splice(i, 1); setTimeout(renderAlarm, 0); }
+    closeLocalNotif(t.id);
+    const r = t.remindedFor;
+    if (!r || D.parseLocalDT(r).getTime() < Date.now() - 12 * 3600000) return;
+    if (!pushSupported() || !syncReady()) return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+        const { data } = await sync.client.auth.getSession();
+        const token = data && data.session && data.session.access_token;
+        if (!sub && !token) return;
+        await fetch('/api/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismiss: { id: t.id, endpoint: sub ? sub.endpoint : undefined, token: sub ? undefined : token } }) });
+      } catch (e) { }
+    })();
+  }
+  function closeLocalNotif(id) {
+    try { if ('serviceWorker' in navigator && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.getNotifications({ tag: id })).then(ns => ns.forEach(n => n.close())).catch(() => { }); } catch (e) { }
   }
   function renderAlarm() {
     const el = $('#alarm');
@@ -2053,6 +2077,7 @@
       const b = e.target.closest('[data-al]'); if (!b) return;
       const t = taskById(alarmQueue[0]); const k = b.dataset.al;
       alarmQueue.shift();
+      if (t && k !== 'done') clearReminder(t); // Complete clears it on the way through finishTask
       if (t) {
         if (k === 'done') completeTask(t);
         else if (k === 'open') { ui.selected = t.id; render(); }
@@ -2263,6 +2288,7 @@
       const li = live.findIndex(x => x.id === id); if (li >= 0) live.splice(li, 1);
       if (bin) { const bi = bin.findIndex(x => x.id === id); if (bi >= 0) bin.splice(bi, 1); }
       if (!r.deleted) { const obj = r.data; if (kind === 'task' && prev) obj.remindedFor = prev.remindedFor; ((obj.deletedAt && bin) ? bin : live).push(obj); }
+      if (kind === 'task' && (r.deleted || !r.data || r.data.done || r.data.deletedAt || (prev && prev.remindedFor && effectiveReminder(prev) === prev.remindedFor && effectiveReminder(r.data) !== prev.remindedFor))) { const ai = alarmQueue.indexOf(id); if (ai >= 0) { alarmQueue.splice(ai, 1); setTimeout(renderAlarm, 0); } closeLocalNotif(id); }
       changed = true;
       sync.meta.shadow[k] = j;
     }
@@ -4393,7 +4419,10 @@
   // Opened from a notification: show that task
   const openTask = id => { if (!id || !taskById(id)) return; ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };
   try { const q = new URLSearchParams(location.search).get('open'); if (q) { history.replaceState(null, '', location.pathname); openTask(q); setTimeout(() => openTask(q), 2500); } } catch (e) { }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen); });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.tallyOpen) openTask(e.data.tallyOpen);
+    if (e.data && e.data.tallyClear) { const i = alarmQueue.indexOf(e.data.tallyClear); if (i >= 0) { alarmQueue.splice(i, 1); renderAlarm(); } } // dealt with on another device
+  });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
   bindNotes(); bindJournal(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;

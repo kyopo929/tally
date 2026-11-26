@@ -82,10 +82,29 @@ function dueNow(work, now) {
   }
   return out;
 }
+// A reminder was dealt with on one device (dismissed, tapped, completed, snoozed): which of that person's
+// other devices were sent it in the last 12 hours and haven't been cleared yet. The device that reported it
+// is marked cleared too (nothing is sent to it). Returns [{ endpoint, sub, taskId, at, send }].
+const CLEAR_MS = 12 * 3600 * 1000;
+function clearTargets(work, user, taskId, fromEndpoint, now) {
+  const subs = new Map((work.subs || []).filter(s => s.user === user).map(s => [s.endpoint, s]));
+  const done = new Set();
+  (work.sent || []).forEach(([ep, id, at]) => { if (id === taskId && /^clear\|/.test(at)) done.add(ep + '|' + at.slice(6)); });
+  const out = [];
+  for (const [ep, id, at] of work.sent || []) {
+    if (id !== taskId || /^clear\|/.test(at) || done.has(ep + '|' + at)) continue;
+    const s = subs.get(ep); if (!s) continue;
+    const when = localToUtc(at, validTz(s.tz) ? s.tz : 'UTC');
+    if (!(when > now - CLEAR_MS)) continue;
+    done.add(ep + '|' + at);
+    out.push({ endpoint: ep, sub: s.sub, taskId, at, send: ep !== fromEndpoint });
+  }
+  return out;
+}
 function expText(iso, today) {
   const d = Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000);
   return d < 0 ? 'Expired' : d === 0 ? 'Expires today' : 'Expires in ' + d + ' day' + (d === 1 ? '' : 's');
 }
 function validTz(tz) { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return !!tz; } catch (e) { return false; } }
 
-module.exports = { dueNow, effectiveReminder, localToUtc, dayLabel, fmtTime, addDaysISO, WINDOW_MS };
+module.exports = { dueNow, clearTargets, effectiveReminder, localToUtc, dayLabel, fmtTime, addDaysISO, WINDOW_MS };

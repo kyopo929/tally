@@ -1,7 +1,7 @@
 // node tests/push.test.js — checks which reminders the server sends, and when.
 'use strict';
 const assert = require('assert');
-const { dueNow, localToUtc, effectiveReminder } = require('../api/_reminders');
+const { dueNow, localToUtc, effectiveReminder, clearTargets } = require('../api/_reminders');
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; };
@@ -65,6 +65,29 @@ ok('a snoozed reminder wins over the due time', () => {
 
 // The keys made by setup-push.html work with the sender's push library
 ok('setup page keys are accepted by web-push', () => {});
+
+// Dealt with on one device → cleared on the others
+const phone = { endpoint: 'https://push.example/phone', user: 'u1', sub: { endpoint: 'https://push.example/phone' }, tz: 'Asia/Dubai' };
+const laptop = { endpoint: 'https://push.example/laptop', user: 'u1', sub: { endpoint: 'https://push.example/laptop' }, tz: 'Asia/Dubai' };
+const friend = { endpoint: 'https://push.example/friend', user: 'u2', sub: { endpoint: 'https://push.example/friend' }, tz: 'Asia/Dubai' };
+const cw = { subs: [phone, laptop, friend], sent: [[phone.endpoint, 'rent', '2026-11-23T09:00'], [laptop.endpoint, 'rent', '2026-11-23T09:00'], [friend.endpoint, 'rent', '2026-11-23T09:00'], [laptop.endpoint, 'rent', '2026-11-21T09:00']] };
+ok('dismissed on the phone: the laptop gets a clear, the phone is only marked', () => {
+  const t = clearTargets(cw, 'u1', 'rent', phone.endpoint, now);
+  assert.deepStrictEqual(t.map(x => [x.endpoint, x.send]), [[phone.endpoint, false], [laptop.endpoint, true]]);
+});
+ok('never touches another person, or reminders older than 12 hours', () => {
+  const t = clearTargets(cw, 'u1', 'rent', phone.endpoint, now);
+  assert.ok(!t.some(x => x.endpoint === friend.endpoint || x.at === '2026-11-21T09:00'));
+});
+ok('already cleared: nothing is sent again', () => {
+  const w = Object.assign({}, cw, { sent: cw.sent.concat([[phone.endpoint, 'rent', 'clear|2026-11-23T09:00'], [laptop.endpoint, 'rent', 'clear|2026-11-23T09:00']]) });
+  assert.strictEqual(clearTargets(w, 'u1', 'rent', laptop.endpoint, now).length, 0);
+});
+ok('clear markers never block or trigger a reminder', () => {
+  const w = { subs: [sub], tasks, sent: [[sub.endpoint, 'rent', 'clear|2026-11-23T09:00']] };
+  assert.ok(dueNow(w, now).some(d => d.taskId === 'rent'));
+});
+
 (async () => {
   let webpush;
   try { webpush = require('web-push'); } catch (e) { console.log('all ' + n + ' push cases pass (web-push not installed here, key check skipped)'); return; }
