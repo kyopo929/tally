@@ -4538,12 +4538,12 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     return '<div class="prow' + (sel ? ' on' : '') + (p.failed && !p.redone ? ' bad' : '') + '">' +
       '<input type="checkbox" class="pchk" data-paysel="' + x.t.id + '"' + (sel ? ' checked' : '') + ' aria-label="Select">' +
       '<span class="pdate">' + esc(payDate(p.date)) + '</span>' +
-      '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || p.what || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
+      '<button type="button" class="pmain" data-payedit="' + x.t.id + '"><span class="pwho">' + esc(p.payee || (p.dir === 'in' ? 'Head office' : p.what) || '(no name)') + '</span>' + (sub ? '<span class="psub">' + sub + '</span>' : '') +
       (opts && opts.why && why.length ? '<span class="pwhy">' + why.map(esc).join(' · ') + '</span>' : '') + '</button>' +
       '<span class="pamt' + (p.dir === 'in' ? ' in' : '') + '">' + (p.dir === 'in' ? '+' : '') + money(p.amount) + '</span>' +
       '<button type="button" class="pst st-' + p.status + '" ' + (nextSt ? 'data-paynext="' + x.t.id + '" title="Click to mark ' + PAY_NAME[nextSt] + '"' : 'disabled') + '>' + PAY_NAME[p.status] + '</button></div>';
   }
-  const payTotal = xs => xs.reduce((s, x) => s + (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0), 0);
+  const payTotal = xs => xs.reduce((s, x) => s + (x.p.status === 'paid' && (x.p.failed || x.p.twice) ? 0 : (x.p.dir === 'in' ? -1 : 1) * (Number(x.p.amount) || 0)), 0); // a failed transfer or a row in both columns moved no money
   // Payrolls, newest first: { name, xs (regular lines), all (incl. added lines), date (pay date), two (a 2-week payroll) }
   function payRuns(all) {
     const m = new Map(); all.filter(x => x.p.run).forEach(x => { if (!m.has(x.p.run)) m.set(x.p.run, []); m.get(x.p.run).push(x); });
@@ -4868,7 +4868,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
   // Suggest repeating payments from history: same name and amount, at a steady gap (2 weeks, a month, 3 or 6 months, a year)
   function findRecurring() {
     const cfg = payCfg(), have = new Set(cfg.recurring.map(r => normName(r.name) + '|' + Math.round(r.amount))), rosterNames = new Set(cfg.roster.map(r => normName(payName(r))));
-    const g = new Map(); pays().filter(x => !x.p.run && x.p.date && x.p.amount >= 100 && x.p.status === 'paid' && !x.p.failed).forEach(x => { const nm = x.p.payee || x.p.what || (x.p.dir === 'in' ? 'Money in' : 'Payment'); const k = normName(nm) + '|' + x.p.dir + '|' + Math.round(x.p.amount); if (!g.has(k)) g.set(k, { name: nm, dir: x.p.dir, amount: x.p.amount, ds: [] }); g.get(k).ds.push(x.p.date); });
+    const g = new Map(); pays().filter(x => !x.p.run && x.p.date && x.p.amount >= 100 && x.p.status === 'paid' && !x.p.failed).forEach(x => { const nm = x.p.payee || (x.p.dir === 'in' ? 'Head office funding' : x.p.what) || 'Payment'; const k = normName(nm) + '|' + x.p.dir + '|' + Math.round(x.p.amount); if (!g.has(k)) g.set(k, { name: nm, dir: x.p.dir, amount: x.p.amount, ds: [] }); g.get(k).ds.push(x.p.date); });
     const today = D.startOfDay(new Date()), out = [];
     g.forEach(v => {
       const ds = [...new Set(v.ds)].sort(); if (ds.length < 2) return;
@@ -4958,9 +4958,10 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
       if (c[0]) { ctx = dt ? (dt > soon ? 'skip' : 'date') : /^(pending|due)\b/i.test(c[0]) ? 'pend' : 'skip'; if (dt) lastDate = dt; } // a month heading like "SEP", or a date more than a week ahead, is a forecast: skipped
       const pending = ctx === 'pend';
       if (!ctx || ctx === 'skip') { if (isAmt(c[5]) || isAmt(c[6])) out.skipped++; return; }
-      const vendor = c[1] || (!c[0] && lastVendor ? lastVendor : ''); if (c[1]) lastVendor = c[1]; else if (c[0]) lastVendor = '';
       const dep = isAmt(c[5]) ? toNum(c[5]) : NaN, chk = isAmt(c[6]) ? toNum(c[6]) : NaN, note = c[8] || '';
+      const vendor = c[1] || (!c[0] && lastVendor && !(dep > 0 && !(chk > 0)) ? lastVendor : ''); if (c[1]) lastVendor = c[1]; else if (c[0]) lastVendor = ''; // money in with no vendor is head office funding: it never borrows a name
       if (!(dep > 0) && !(chk > 0)) return;
+      if (/^rounding\b/i.test(c[4] || '') || /^rounding\b/i.test(c[1] || '')) { out.rounding = (out.rounding || 0) + 1; return; } // Excel's leftover decimals, not money
       const failed = dep > 0 && chk > 0 && Math.abs(dep - chk) < 0.01 && /not go through|didn.?t go through|did not go/i.test(note);
       const same = dep > 0 && chk > 0 && !failed && Math.abs(dep - chk) < 0.01, both = dep > 0 && chk > 0 && !failed && !same;
       const desc = c[4] || '', isRun = !!(c[3] && periodText(desc));
@@ -4990,7 +4991,7 @@ label.fcrow { grid-template-columns: 22px 1fr auto; cursor: pointer; }
     const el = $('#piSum'); if (!el) return;
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value), fresh = rows.filter(r => !have.has(payKey(r)));
     const runs = new Set(fresh.filter(r => r.run).map(r => r.run)).size, tp = fresh.filter(r => r.status === 'req').length, bad = fresh.filter(r => r.failed && !r.redone).length;
-    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
+    el.innerHTML = rows.length ? '<b>' + fresh.length + ' to import</b>' + (rows.length > fresh.length ? ' (' + (rows.length - fresh.length) + ' already in Tally)' : '') + ' · ' + runs + ' payroll' + (runs === 1 ? '' : 's') + ' · ' + tp + ' to pay' + (bad ? ' · ' + bad + ' didn’t go through' : '') + (rows.skipped ? ' · ' + rows.skipped + ' skipped (forecast rows, or no date above them)' : '') + (rows.rounding ? ' · ' + rows.rounding + ' rounding rows left out' : '') + ' · out AED ' + money(fresh.filter(r => r.dir === 'out').reduce((s, r) => s + r.amount, 0)) + ', in AED ' + money(fresh.filter(r => r.dir === 'in').reduce((s, r) => s + r.amount, 0)) : '';
   }
   async function saveImport() {
     const have = new Set(pays().map(x => payKey(x.p))), rows = parseSheetRows($('#pi_rows').value).filter(r => !have.has(payKey(r)));
