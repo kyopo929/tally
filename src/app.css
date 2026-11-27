@@ -1492,3 +1492,18 @@ body.onko .qa-wrap { display: none; }
 /* a long line from the + Tally bookmark gets its own full-width row */
 .ko-addrow.pre { grid-template-columns: 1fr 1fr .9fr auto; }
 .ko-addrow.pre .ka-ex { grid-column: 1 / -1; grid-row: 2; }
+
+.ko-tools { display: grid; gap: 8px; }
+.ko-tool { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.ko-tool > div { flex: 1; min-width: 220px; display: grid; gap: 2px; }
+.ko-tool span { font-size: 12.5px; color: var(--muted); }
+.ko-reset { margin-left: auto; color: var(--muted); }
+.ko-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; margin-top: 4px; }
+.ko-chips .hint { width: 100%; text-align: center; }
+.ko-form .ko-chips { justify-content: flex-start; } .ko-form .ko-chips .hint { text-align: left; }
+.ko-chip { padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); font-size: 14px; }
+.ko-chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ko-sortsrc { width: auto; max-width: 210px; padding: 3px 6px; margin-right: 10px; font-size: 12.5px; }
+.ko-sortcard { min-height: 220px; }
+.ko-sortacts .chipbtn { min-width: 150px; justify-content: center; }
+.ko-allknown { margin-right: 12px; }
