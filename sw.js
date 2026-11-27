@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION when files change.
-const VERSION = 'tally-v99';
+const VERSION = 'tally-v100';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './vendor/supabase.js', './config.js'];
 const PUSH_LOG = 'tally-push-log'; // reminders already shown by a push, so the app doesn't show them again
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
@@ -62,7 +62,7 @@ self.addEventListener('push', e => {
       body: d.body || '', tag: d.id || undefined, renotify: true,
       icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png',
       data: { id: d.id || null, at: d.at || null }, timestamp: Date.now(),
-      actions: d.id ? (d.event ? [] : [{ action: 'done', title: 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) : []
+      actions: d.id ? (d.event ? [] : [{ action: 'done', title: d.msg ? 'Replied' : 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) : []
     });
   })());
 });

@@ -8,6 +8,7 @@
   const todayISO = () => D.toISO(new Date());
   const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments') && !/Android/i.test(navigator.userAgent || ''); // Payments section: original site only (api/_cfg.js), and not on the Android phone
   const isPay = t => !!t && t.type === 'payment';
+  const isMsg = t => !!t && t.type === 'msg'; // a text or WhatsApp message waiting in My Day (Settings → Texts & WhatsApp)
   const COLORS = ['#2856c7', '#2a9d8f', '#d99100', '#c4372c', '#7b4fc9', '#3d8b37', '#d0559a', '#607089'];
 
   const I = {
@@ -52,6 +53,7 @@
     restore: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 108-8 8.5 8.5 0 00-6 2.5L4 8.5"/><path d="M4 4v4.5h4.5"/></svg>',
     star: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M12 12.3l1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z" fill="currentColor" stroke-width="1"/></svg>',
     meet: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M15.6 14.3a4.5 4.5 0 015 4.2"/></svg>',
+    chat: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v11H9l-4.5 3.5V5.5z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
     folder: '<svg viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg>'
   };
 
@@ -987,7 +989,7 @@
     if (ui.search) {
       const q = ui.search.toLowerCase();
       const tq = q.replace(/^@/, '');
-      const hit = t => !isPaper(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
+      const hit = t => !isPaper(t) && !isMsg(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
       const found = sortTasks(S.tasks.filter(t => !t.done && hit(t)));
       const doneFound = S.tasks.filter(t => t.done && hit(t)).sort((a, b) => b.doneAt - a.doneAt);
       title = 'Search'; sub = '\u201c' + ui.search + '\u201d';
@@ -1003,13 +1005,14 @@
       const today = sortTasks(od.filter(t => t.due === T));
       const added = sortTasks(od.filter(t => (t.myDay === T || t.start === T) && !(t.due && t.due <= T)));
       const di = dayItems(T);
-      html = section('Follow up', sortTasks(o.filter(nudgeDue)), { showList: true }) + section('Today\u2019s events', di.singles, { day: T, spans: di.spans }) + section('Overdue', over, { overdue: true, showList: true, action: '<button type="button" class="sect-act" data-resched="1">Move all to today</button>' }) + section('Due today', today, { showList: true }) + section('Added to My Day or starting today', added, { showList: true });
+      html = msgSections('people') + section('Follow up', sortTasks(o.filter(nudgeDue)), { showList: true }) + section('Today\u2019s events', di.singles, { day: T, spans: di.spans }) + section('Overdue', over, { overdue: true, showList: true, action: '<button type="button" class="sect-act" data-resched="1">Move all to today</button>' }) + section('Due today', today, { showList: true }) + section('Added to My Day or starting today', added, { showList: true });
       const doneToday = S.tasks.filter(t => t.done && taskInScope(t) && t.doneAt && D.toISO(new Date(t.doneAt)) === T);
       const in3 = D.toISO(D.addDays(new Date(), 3));
       const sugg = sortTasks(od.filter(t => t.due && t.due > T && t.due <= in3 && t.myDay !== T && t.start !== T));
       html += section('Suggestions: due in the next 3 days', sugg, { key: 'sugg', open: true, showList: true });
+      html += msgSections('biz');
       html += section('Completed today', doneToday, { key: 'myday', showList: true });
-      if (!over.length && !today.length && !added.length) html = empty('Nothing planned for today', 'Tap the sun on any task to add it here, or type "today" in the box above.') + html;
+      if (!over.length && !today.length && !added.length && !S.tasks.some(t => isMsg(t) && t.person)) html = empty('Nothing planned for today', 'Tap the sun on any task to add it here, or type "today" in the box above.') + html;
     } else if (v === 'upcoming') {
       title = 'Upcoming'; sub = 'Next two weeks';
       const over = sortTasks(o.filter(t => t.due && t.due < T));
@@ -1532,10 +1535,10 @@
   function fireNotification(t) {
     try {
       if (notifSupported() && Notification.permission === 'granted') {
-        const body = isWaiting(t) && nudgeRem(t) ? 'Waiting on ' + t.waiting.who + ' since ' + shortDate(t.waiting.since) + '. Time to follow up.' : t.expFor && t.due ? (t.due === todayISO() ? 'Expires today' : 'Expires ' + D.dueLabel(t.due) + ' (' + D.diffDays(D.fromISO(t.due), D.fromISO(todayISO())) + ' days)') : (t.due ? (isEvent(t) ? '' : 'Due ') + D.dueLabel(t.due) + (t.time ? ' ' + D.fmtTime(t.time) : '') : 'Reminder') + (S.lists.length > 1 ? ' · ' + ((listById(t.listId) || {}).name || '') : '');
-        const plain = () => { const n = new Notification(plainLinks(t.title), { body, tag: t.id }); n.onclick = () => { window.focus(); ui.selected = t.id; render(); }; };
+        const body = isMsg(t) ? (t.src === 'wa' ? 'WhatsApp: ' : 'Text: ') + msgLast(t).slice(0, 160) : isWaiting(t) && nudgeRem(t) ? 'Waiting on ' + t.waiting.who + ' since ' + shortDate(t.waiting.since) + '. Time to follow up.' : t.expFor && t.due ? (t.due === todayISO() ? 'Expires today' : 'Expires ' + D.dueLabel(t.due) + ' (' + D.diffDays(D.fromISO(t.due), D.fromISO(todayISO())) + ' days)') : (t.due ? (isEvent(t) ? '' : 'Due ') + D.dueLabel(t.due) + (t.time ? ' ' + D.fmtTime(t.time) : '') : 'Reminder') + (S.lists.length > 1 ? ' · ' + ((listById(t.listId) || {}).name || '') : '');
+        const plain = () => { const n = new Notification(plainLinks(t.title), { body, tag: t.id }); n.onclick = () => { window.focus(); if (isMsg(t)) showMsg(t); else { ui.selected = t.id; render(); } }; };
         // Phones only allow notifications through the service worker; the same tag means a push for this reminder is replaced, not doubled
-        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id, at: t.remindedFor || null }, actions: (isEvent(t) || t.type ? [] : [{ action: 'done', title: 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) })).catch(() => { try { plain(); } catch (e) { } });
+        if (pushSupported() && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(plainLinks(t.title), { body, tag: t.id, icon: 'icons/icon-192.png?v=2', badge: 'icons/badge-96.png', data: { id: t.id, at: t.remindedFor || null }, actions: (isMsg(t) ? [{ action: 'done', title: 'Replied' }] : isEvent(t) || t.type ? [] : [{ action: 'done', title: 'Done' }]).concat([{ action: 'snooze', title: 'Snooze 1 hour' }]) })).catch(() => { try { plain(); } catch (e) { } });
         else plain();
       }
     } catch (e) { }
@@ -1574,7 +1577,8 @@
     el.hidden = false;
     el.innerHTML = '<div class="when">' + I.bell + 'Reminder' + (alarmQueue.length > 1 ? ' · ' + alarmQueue.length + ' waiting' : '') + '</div><div class="t">' + esc(unbr(t.title)) + '</div>' +
       (t.due ? '<div class="when">' + I.cal + 'Due ' + esc(D.dueLabel(t.due)) + (t.time ? ' ' + D.fmtTime(t.time) : '') + '</div>' : '') +
-      '<div class="row">' + (isEvent(t) ? '' : '<button type="button" class="chipbtn" data-al="done">Complete</button>') + '<button type="button" class="chipbtn" data-al="10">Snooze 10 min</button><button type="button" class="chipbtn" data-al="60">1 hour</button><button type="button" class="chipbtn" data-al="open">Open</button><button type="button" class="chipbtn" data-al="dismiss">Dismiss</button></div>';
+      (isMsg(t) ? '<div class="when">' + esc(msgLast(t)) + '</div>' : '') +
+      '<div class="row">' + (isMsg(t) ? '<button type="button" class="chipbtn" data-al="replied">Replied</button>' : isEvent(t) ? '' : '<button type="button" class="chipbtn" data-al="done">Complete</button>') + '<button type="button" class="chipbtn" data-al="10">Snooze 10 min</button><button type="button" class="chipbtn" data-al="60">1 hour</button><button type="button" class="chipbtn" data-al="open">Open</button><button type="button" class="chipbtn" data-al="dismiss">Dismiss</button></div>';
   }
 
   function autosize(ta) { if (!ta) return; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
@@ -1608,6 +1612,7 @@
         '<button type="button" data-mact="notif">' + I.bell + esc(notifStatus()) + '</button>' +
         '<button type="button" data-mact="donesound">' + I.check + (S.settings.doneSound === false ? 'Sound when a task is done: off' : 'Sound when a task is done: on') + '</button>' +
         '<div class="mlabel">Your data</div>' + (syncAvailable() ? (sync.user ? '<button type="button" data-mact="signout">' + I.x + 'Sign out of sync (' + esc(sync.user.email || '') + ')</button>' : '<button type="button" data-mact="signin">' + I.repeat + 'Turn on sync\u2026</button>') : '') +
+        (syncAvailable() ? '<button type="button" data-mact="msgs">' + I.chat + 'Texts & WhatsApp in My Day\u2026</button>' : '') +
         '<button type="button" data-mact="feed">' + I.cal + 'Show tasks in Outlook or Google\u2026</button>' +
         '<button type="button" data-mact="outlook">' + I.cal + (olOn() ? 'Outlook meetings: shown\u2026' : 'Show my Outlook meetings\u2026') + '</button>' +
         '<button type="button" data-mact="icsimport">' + I.cal + 'Import a calendar file (.ics)\u2026</button>' +
@@ -2260,6 +2265,8 @@
       if (t && k !== 'done') clearReminder(t); // Complete clears it on the way through finishTask
       if (t) {
         if (k === 'done') completeTask(t);
+        else if (k === 'replied') dropMsg(t, 'Marked as replied');
+        else if (k === 'open' && isMsg(t)) showMsg(t);
         else if (k === 'open') { ui.selected = t.id; render(); }
         else if (k !== 'dismiss') { const d = new Date(Date.now() + Number(k) * 60000); d.setSeconds(0, 0); t.reminder = D.toLocalDT(d); t.remindedFor = null; save(); render(); toast('Snoozed until ' + D.fmtTime(t.reminder.slice(11))); }
       }
@@ -5582,6 +5589,155 @@
       '<div class="hint">' + (nudgeDue(t) ? 'Time to follow up.' : 'Next nudge ' + esc(D.dueLabel(w.nudge)) + '.') + (w.count ? ' Followed up ' + w.count + ' time' + (w.count === 1 ? '' : 's') + (w.last ? ', last ' + esc(shortDate(w.last)) : '') + '.' : '') + '</div>' +
       '<div class="row-btns"><button type="button" class="chipbtn' + (nudgeDue(t) ? ' solid' : '') + '" data-wait="nudged">Followed up</button><select class="ctl" id="wEvery" aria-label="Nudge every">' + WAIT_DAYS.map(([d, n]) => '<option value="' + d + '"' + (w.every === d ? ' selected' : '') + '>Nudge every ' + n + '</option>').join('') + '</select><button type="button" class="chipbtn" data-wait="stop">Stop waiting</button></div></div>';
   }
+  /* ---------- Texts & WhatsApp in My Day ----------
+     The phone (MacroDroid) sends each new message to /api/msg; the server files one item per sender
+     (type:'msg': src 'sms'|'wa', from, name, person, msgs [{at, text}], last, reminder = a nudge an hour later).
+     People: "Reply to Ravi" at the top of My Day until Replied. Businesses: a folded "Other texts" list, gone after 7 days. */
+  const msgLast = t => { const m = (t.msgs || [])[(t.msgs || []).length - 1]; return m ? String(m.text || '') : ''; };
+  function msgWhen(ms) {
+    const d = new Date(ms), T = todayISO(), iso = D.toISO(d), hm = D.fmtTime(String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'));
+    return iso === T ? hm : iso === D.toISO(D.addDays(new Date(), -1)) ? 'Yesterday ' + hm : D.MON_SHORT[d.getMonth()] + ' ' + d.getDate() + ', ' + hm;
+  }
+  const msgSrc = t => t.src === 'wa' ? 'WhatsApp' : 'Text';
+  function msgRow(t) {
+    const ms = t.msgs || [], open = ui.msgOpen === t.id, shown = open ? ms : ms.slice(-1);
+    const num = t.src === 'sms' && t.person && /^[\d\s+()-]{8,}$/.test(t.from || '') ? t.from.replace(/[^\d+]/g, '') : '';
+    return '<div class="msg' + (t.person ? '' : ' biz') + '" data-msg="' + esc(t.id) + '">' +
+      '<div class="msg-head">' + I.chat + '<b>' + esc(t.title) + '</b><span class="msg-when">' + esc(msgSrc(t)) + ' · ' + esc(msgWhen(t.last || (ms[ms.length - 1] || {}).at || Date.now())) + (ms.length > 1 ? ' · ' + ms.length + ' messages' : '') + '</span>' +
+      (t.person ? '' : '<button type="button" class="iconbtn" data-msgact="drop" aria-label="Remove" title="Remove">' + I.x + '</button>') + '</div>' +
+      shown.map(m => '<div class="msg-text">' + (open && ms.length > 1 ? '<span class="msg-at">' + esc(msgWhen(m.at)) + '</span>' : '') + linkText(m.text) + '</div>').join('') +
+      (ms.length > 1 ? '<button type="button" class="linkbtn msg-more" data-msgact="more">' + (open ? 'Show only the latest' : 'Show all ' + ms.length) + '</button>' : '') +
+      (t.person ? '<div class="msg-btns"><button type="button" class="chipbtn solid" data-msgact="replied">' + I.check + 'Replied</button>' +
+        (num && IS_ANDROID ? '<a class="chipbtn" href="sms:' + esc(num) + '">Text back</a>' : '') +
+        '<button type="button" class="chipbtn" data-msgact="task" title="Make it a task for today and clear it from here">Make a task</button></div>' : '') +
+      '</div>';
+  }
+  // Message text with web links clickable, nothing else interpreted
+  function linkText(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, u => '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>').replace(/\n/g, '<br>'); }
+  function msgSections(which) {
+    const ms = S.tasks.filter(isMsg).sort((a, b) => (b.last || 0) - (a.last || 0));
+    const ppl = which === 'people' ? ms.filter(t => t.person) : [], biz = which === 'biz' ? ms.filter(t => !t.person) : [];
+    let h = '';
+    if (ppl.length) h += '<div class="section"><div class="section-head">Messages to answer <span class="n">' + ppl.length + '</span></div><div class="msgs">' + ppl.map(msgRow).join('') + '</div></div>';
+    if (biz.length) {
+      const shown = !!ui.showDone.msgbiz;
+      h += '<div class="section"><div class="section-head"><button type="button" data-done-toggle="msgbiz" aria-expanded="' + shown + '">' + I.chev + 'Other texts <span class="n">' + biz.length + '</span></button>' +
+        (shown ? '<button type="button" class="sect-act" data-msgclear="1">Clear all</button>' : '') + '</div>' + (shown ? '<div class="msgs">' + biz.map(msgRow).join('') + '</div>' : '') + '</div>';
+    }
+    return h;
+  }
+  function dropMsg(t, msg) {
+    if (!t) return;
+    snapshot(); clearReminder(t);
+    S.tasks = S.tasks.filter(x => x !== t);
+    if (ui.msgOpen === t.id) ui.msgOpen = null;
+    save(); render(); if (msg) toast(msg, true);
+  }
+  function msgToTask(t) {
+    const lines = (t.msgs || []).map(m => msgWhen(m.at) + ': ' + m.text).join('\n');
+    snapshot(); clearReminder(t);
+    newTask({ title: t.person ? t.title : 'Deal with text from ' + t.name, due: todayISO(), notes: msgSrc(t) + ' from ' + t.name + (t.from && t.from !== t.name ? ' (' + t.from + ')' : '') + '\n' + lines });
+    S.tasks = S.tasks.filter(x => x !== t);
+    save(); render(); toast('Added to today: ' + (t.person ? t.title : 'Deal with text from ' + t.name), true);
+  }
+  // Opened from a notification or the reminder pop-up: My Day, with that message unfolded
+  function showMsg(t) {
+    ui.dayPanel = null; ui.awayPanel = false; ui.selected = null; ui.search = '';
+    ui.msgOpen = t.id; if (!t.person) ui.showDone.msgbiz = true;
+    document.querySelector('.app').classList.remove('nav-open');
+    setView('myday');
+    setTimeout(() => { const el = document.querySelector('[data-msg="' + CSS.escape(t.id) + '"]'); if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); } }, 60);
+  }
+  // Business texts go after a week; unanswered ones from people after 30 days
+  function tidyMsgs() {
+    const now = Date.now(), old = S.tasks.filter(t => isMsg(t) && (t.last || 0) < now - (t.person ? 30 : 7) * 86400000);
+    if (!old.length) return;
+    S.tasks = S.tasks.filter(t => !old.includes(t)); save(); if (ui.view === 'myday') renderMain();
+  }
+
+  // Settings → Texts & WhatsApp in My Day: the private link for the phone, and how to set up MacroDroid
+  async function getMsgToken(reset) {
+    const tbl = () => sync.client.from('msg_tokens');
+    const { data, error } = await tbl().select('token,tz').maybeSingle();
+    if (error) throw error;
+    if (!data) { const token = newToken(); const r = await tbl().insert({ user_id: sync.user.id, token, tz: myTz() }); if (r.error) throw r.error; return token; }
+    if (reset || data.tz !== myTz()) {
+      const token = reset ? newToken() : data.token;
+      const r = await tbl().update({ token, tz: myTz() }).eq('user_id', sync.user.id); if (r.error) throw r.error; return token;
+    }
+    return data.token;
+  }
+  function copyText(v, what) { try { navigator.clipboard.writeText(v).then(() => toast(what + ' copied'), () => toast('Couldn’t copy. Press and hold to copy instead.')); } catch (e) { toast('Couldn’t copy. Press and hold to copy instead.'); } }
+  const MSG_BODY_SMS = '{"src":"sms","from":"{sms_number}","name":"{sms_name}","text":"{sms_message}"}';
+  const MSG_BODY_WA = '{"src":"wa","from":"{not_title}","name":"","text":"{not_text}"}';
+  async function openMsgSetup() {
+    const el = $('#sheet');
+    const shell = inner => '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="msTitle"><div class="sheet-head"><h2 id="msTitle">Texts & WhatsApp in My Day</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' + inner + '</div></div>';
+    if (!syncReady()) { el.innerHTML = shell('<p>Messages arrive through your synced account, so turn on sync first (bottom left). Then come back here.</p>'); el.hidden = false; return; }
+    el.innerHTML = shell('<p>Getting your private link…</p>'); el.hidden = false;
+    let token;
+    try { token = await getMsgToken(false); }
+    catch (err) {
+      const missing = /msg_tokens|does not exist|schema cache|relation/i.test(err.message || '');
+      el.innerHTML = shell(missing
+        ? '<p>One-time setup in Supabase first (about a minute):</p><ol class="howto"><li><button type="button" class="chipbtn solid" id="msSql">Copy the setup SQL</button></li><li>Open <b>supabase.com</b> → your Tally project → <b>SQL Editor</b> → <b>New query</b>.</li><li>Paste, then click <b>Run</b>. It should say <b>Success</b>.</li><li>Come back here and <button type="button" class="linkbtn" id="msRetry">try again</button>.</li></ol>'
+        : '<p>Couldn’t get your link: ' + esc(err.message || String(err)) + '</p><p><button type="button" class="linkbtn" id="msRetry">Try again</button></p>');
+      const sq = $('#msSql'); if (sq) sq.onclick = async () => { try { const r = await fetch('/supabase/messages.sql', { cache: 'no-store' }); if (!r.ok) throw 0; copyText(await r.text(), 'Setup SQL'); } catch (e) { toast('Couldn’t load the SQL. Reload Tally and try again.'); } };
+      $('#msRetry').onclick = () => openMsgSetup();
+      return;
+    }
+    const link = location.origin + '/api/msg?t=' + token;
+    const copyRow = (id, label, v) => '<div class="field"><label for="' + id + '">' + label + '</label><div style="display:flex;gap:8px"><input class="ctl" id="' + id + '" readonly value="' + esc(v) + '"><button type="button" class="chipbtn solid" data-mscopy="' + id + '">Copy</button></div></div>';
+    el.innerHTML = shell(
+      '<p>New texts and WhatsApp messages show up at the top of <b>My Day</b>. From a person: <b>Reply to …</b> until you tap Replied, with a reminder an hour later (overnight ones at 6am). From businesses (banks, deliveries, du): a folded <b>Other texts</b> list that clears itself after a week. One-time codes are thrown away by Tally’s server, never saved.</p>' +
+      copyRow('msLink', 'Your private link for MacroDroid', link) +
+      '<span class="hint">Anyone with this link could put messages into your Tally. Don’t share it.</span>' +
+      '<p style="margin-top:10px"><button type="button" class="chipbtn" id="msTest">Send a test message</button> <span class="hint" id="msMsg"></span></p>' +
+      '<h3>On your phone: texts</h3><ol class="howto">' +
+        '<li>In MacroDroid tap <b>Add macro</b> (the +). Name it <b>Texts to Tally</b>.</li>' +
+        '<li><b>Triggers +</b> → <b>Call/SMS</b> → <b>SMS Received</b> → <b>Any Number</b> → <b>Any Content</b> → OK. Allow the permissions it asks for.</li>' +
+        '<li><b>Actions +</b> → search for <b>HTTP Request</b>. Method <b>POST</b>, URL: your private link above.</li>' +
+        '<li>In the request’s <b>Body</b>, set the content type to <b>text/plain</b> and paste this:</li></ol>' +
+      copyRow('msBodySms', 'Body for texts', MSG_BODY_SMS) +
+      '<ol class="howto" start="5"><li>Save the macro (the tick).</li></ol>' +
+      '<h3>On your phone: WhatsApp</h3><ol class="howto">' +
+        '<li>Add another macro, <b>WhatsApp to Tally</b>.</li>' +
+        '<li><b>Triggers +</b> → <b>Device Events</b> → <b>Notification</b> → <b>Notification Received</b> → pick <b>WhatsApp</b> → <b>Any Content</b>. Allow notification access.</li>' +
+        '<li><b>Actions +</b> → <b>HTTP Request</b>, the same as above (POST, your link, <b>text/plain</b>), with this body:</li></ol>' +
+      copyRow('msBodyWa', 'Body for WhatsApp', MSG_BODY_WA) +
+      '<p class="hint">WhatsApp only shows what its notification shows: muted chats don’t come through and very long messages are cut short.</p>' +
+      '<h3>Keep it running</h3><p style="margin-top:0">Android may put MacroDroid to sleep. Phone <b>Settings → Apps → MacroDroid → Battery</b> → <b>Unrestricted</b>.</p>' +
+      '<h3>Stop</h3><p style="margin-top:0"><button type="button" class="linkbtn" id="msReset">Make a new link</button>. The old one stops working right away (then paste the new one into both macros).</p>');
+    el.querySelectorAll('[data-mscopy]').forEach(b => b.onclick = () => copyText($('#' + b.dataset.mscopy).value, b.closest('.field').querySelector('label').textContent));
+    $('#msTest').onclick = async () => {
+      const m = $('#msMsg'); m.textContent = 'Sending…';
+      try {
+        const r = await fetch(link, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ src: 'sms', from: '+10000000000', name: 'Tally test', text: 'This is a test. Tap Replied to clear it.' }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+        m.textContent = 'Sent. It should appear in My Day in a few seconds.'; setTimeout(refreshPull, 1500);
+      } catch (e) { m.textContent = 'Didn’t work: ' + (e.message || e); }
+    };
+    $('#msReset').onclick = async () => {
+      if (!$('#msReset').dataset.sure) { $('#msReset').dataset.sure = '1'; $('#msReset').textContent = 'Click again to confirm: make a new link'; return; }
+      try { await getMsgToken(true); openMsgSetup(); toast('New link made. Paste it into both macros.'); } catch (err) { toast(err.message || String(err)); }
+    };
+  }
+  function bindMsgs() {
+    $('#content').addEventListener('click', e => {
+      if (e.target.closest('[data-msgclear]')) { const xs = S.tasks.filter(t => isMsg(t) && !t.person); snapshot(); xs.forEach(clearReminder); S.tasks = S.tasks.filter(t => !xs.includes(t)); save(); render(); toast('Cleared ' + xs.length + ' text' + (xs.length === 1 ? '' : 's'), true); return; }
+      const b = e.target.closest('[data-msgact]'); if (!b) return;
+      const t = taskById(b.closest('[data-msg]').dataset.msg); if (!t) return;
+      const a = b.dataset.msgact;
+      if (a === 'more') { ui.msgOpen = ui.msgOpen === t.id ? null : t.id; renderMain(); return; }
+      if (a === 'replied') dropMsg(t, 'Marked as replied');
+      else if (a === 'drop') dropMsg(t, 'Removed');
+      else if (a === 'task') msgToTask(t);
+    });
+    $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="msgs"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openMsgSetup(); } }, true);
+    setTimeout(tidyMsgs, 5000); setInterval(tidyMsgs, 3600000);
+  }
+
   function bindWaiting() {
     const det = $('#detail');
     det.addEventListener('click', e => {
@@ -5782,11 +5938,12 @@
   if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', () => refreshNews());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) runReminders(); });
   // Opened from a notification: show that task
-  const openTask = id => { if (!id || !taskById(id)) return; ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };
+  const openTask = id => { if (!id || !taskById(id)) return; if (isMsg(taskById(id))) { showMsg(taskById(id)); return; } ui.dayPanel = null; ui.awayPanel = false; ui.selected = id; ui.confirmDelete = false; document.querySelector('.app').classList.remove('nav-open'); render(); };
   // The Done / Snooze buttons on a notification
   function notifAction(act, id) {
     const t = taskById(id); if (!t) return;
-    if (act === 'done') { if (!t.done && !t.type) completeTask(t); else toast('Already done'); }
+    if (act === 'done' && isMsg(t)) dropMsg(t, 'Marked as replied');
+    else if (act === 'done') { if (!t.done && !t.type) completeTask(t); else toast('Already done'); }
     else if (act === 'snooze') { const d = new Date(Date.now() + 60 * 60000); d.setSeconds(0, 0); snapshot(); clearReminder(t); t.reminder = D.toLocalDT(d); t.remRule = null; t.remindedFor = null; save(); render(); toast('Snoozed until ' + D.fmtTime(t.reminder.slice(11)), true); }
     const i = alarmQueue.indexOf(id); if (i >= 0) { alarmQueue.splice(i, 1); renderAlarm(); }
   }
@@ -5801,7 +5958,7 @@
   });
   setTimeout(() => refreshOutlook(), 1500); setInterval(() => refreshOutlook(), 30 * 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOutlook(); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); bindPay(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); bindPay(); bindMsgs(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }

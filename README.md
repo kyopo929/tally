@@ -14,6 +14,7 @@ A personal to-do app to replace Microsoft To Do: lists in groups, quick add in p
 - Reminders when the app is closed: web push. `api/push.js` sends them; Supabase's pg_cron calls it every minute. One-time setup at `/setup-push.html` (makes the keys in your browser, gives the Vercel values and the Supabase SQL). Without that setup, reminders still work while the app is open.
 - Outlook meetings in the calendar (read-only, per device): Settings → Show my Outlook meetings → paste Outlook's published ICS link. `api/outlook.js` reads it (Outlook/Google links only) and `api/_outlook.js` expands repeats, skipped and moved meetings, and Windows time-zone names.
 - Dismissing a reminder on one device clears it on the others (`/api/push` `{dismiss}`); notifications have Done and Snooze 1 hour buttons.
+- Texts & WhatsApp in My Day: Settings → Texts & WhatsApp in My Day. MacroDroid on the phone posts each new SMS / WhatsApp notification to `/api/msg?t=<token>` (`api/msg.js`, reading and sorting in `api/_msg.js`; one-time codes dropped). `msg_in` (`supabase/messages.sql`, run once) files one `type:'msg'` item per sender with a nudge an hour later (overnight → 6am). People: "Reply to …" at the top of My Day (Replied / Make a task); businesses: folded "Other texts", removed after 7 days.
 - Calendar link: Settings → Show tasks in Outlook or Google. `/feed/<token>.ics` (also `-work`/`-personal`) served by `api/feed.js`; needs `supabase/feed.sql` run once.
 
 Live app: https://tally-ntqo.vercel.app (Vercel redeploys on every push to `main`).
@@ -40,6 +41,7 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 `node tests/parser.test.js` checks the quick-add language (dates, repeats, tags, start dates, reminders).
 `node tests/push.test.js` checks which reminders the server sends and when (time zones, per-device settings, no repeats, clearing on other devices).
 `node tests/outlook.test.js` checks reading Outlook's calendar (repeats, exceptions, time zones).
+`node tests/msg.test.js` checks reading and sorting texts from the phone (broken JSON, one-time codes, people vs businesses, WhatsApp summaries).
 
 ## Notes, Documents, locks, backups
 - Notes (`type:'note'`) and Documents (`type:'doc'`: holder, number, expires) are task rows. Any item can have `attachments`.
