@@ -27,6 +27,15 @@ const tasks = [
 ].map(data => ({ user: 'u1', data }));
 const now = Date.parse('2026-11-23T05:03:00Z'); // 9:03am in Dubai
 
+ok('a text waiting for a reply is nudged with the message', () => {
+  const w = { subs: [sub], sent: [], tasks: [{ user: 'u1', data: { id: 'msg-1', type: 'msg', title: 'Reply to Ravi', src: 'sms', reminder: '2026-11-23T09:01', msgs: [{ at: 1, text: 'Old' }, { at: 2, text: 'Can you send the contract?' }] } }] };
+  const d = dueNow(w, now);
+  assert.strictEqual(d.length, 1);
+  assert.strictEqual(d[0].payload.title, 'Reply to Ravi');
+  assert.strictEqual(d[0].payload.body, 'Text: Can you send the contract?');
+  assert.strictEqual(d[0].payload.msg, true);
+});
+
 ok('sends what is due in the last 10 minutes, nothing else', () => {
   const ids = dueNow({ subs: [sub], tasks, sent: [] }, now).map(d => d.taskId).sort();
   assert.deepStrictEqual(ids, ['rem', 'rent']);
