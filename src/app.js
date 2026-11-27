@@ -8,10 +8,13 @@
   const todayISO = () => D.toISO(new Date());
   const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments') && !/Android/i.test(navigator.userAgent || ''); // Payments section: original site only (api/_cfg.js), and not on the Android phone
   const isPay = t => !!t && t.type === 'payment';
+  const KO_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('korean'); // Korean flashcards: original site only (api/_cfg.js), on every device
+  const isKo = t => !!t && t.type === 'kocard';
   const isMsg = t => !!t && t.type === 'msg'; // a text or WhatsApp message waiting in My Day (Settings → Texts & WhatsApp)
   const COLORS = ['#2856c7', '#2a9d8f', '#d99100', '#c4372c', '#7b4fc9', '#3d8b37', '#d0559a', '#607089'];
 
   const I = {
+    ko: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/></svg>',
     pay: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg>',
@@ -580,7 +583,8 @@
     notes: { title: 'Notes', icon: I.notes, cls: 'ico-notes' },
     docs: { title: 'Important Documents', icon: I.idcard, cls: 'ico-docs' },
     journal: { title: 'Journal', icon: I.journal, cls: 'ico-journal' },
-    payments: { title: 'Payments', icon: I.pay, cls: 'ico-pay' }
+    payments: { title: 'Payments', icon: I.pay, cls: 'ico-pay' },
+    korean: { title: 'Korean', icon: '<span class="ko-glyph" lang="ko">한</span>', cls: 'ico-ko' }
   };
   function viewCount(v) {
     const o = open();
@@ -589,6 +593,7 @@
     if (v === 'all') return o.length;
     if (v === 'notes' || v === 'docs' || v === 'journal') return '';
     if (v === 'payments') return vault.key ? pays().filter(x => x.p.status === 'req' || x.p.status === 'ok').length : '';
+    if (v === 'korean') return koCount();
     if (v === 'trash') return S.trash.tasks.length + S.trash.lists.length;
     return '';
   }
@@ -872,7 +877,7 @@
   function renderSide() {
     let h = '<nav class="nav">';
     const overdue = open().filter(t => t.due && t.due < todayISO()).length;
-    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [])) {
+    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [], KO_ON ? ['korean'] : [])) {
       const c = viewCount(v);
       h += '<button type="button" class="nav-item" data-view="' + v + '" aria-current="' + (!ui.search && (ui.view === v || (v === 'notes' && paperView(ui.view)) || (v === 'journal' && ui.view === 'jlink'))) + '"><span class="' + VIEWS[v].cls + '">' + VIEWS[v].icon + '</span><span class="label">' + VIEWS[v].title + '</span>' +
         (c !== '' && c ? '<span class="count' + ((v === 'myday' || v === 'all') && overdue ? ' hot' : '') + '">' + c + '</span>' : '') + '</button>';
@@ -989,7 +994,7 @@
     if (ui.search) {
       const q = ui.search.toLowerCase();
       const tq = q.replace(/^@/, '');
-      const hit = t => !isPaper(t) && !isMsg(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
+      const hit = t => !isPaper(t) && !isMsg(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && !isKo(t) && t.type !== 'kocfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
       const found = sortTasks(S.tasks.filter(t => !t.done && hit(t)));
       const doneFound = S.tasks.filter(t => t.done && hit(t)).sort((a, b) => b.doneAt - a.doneAt);
       title = 'Search'; sub = '\u201c' + ui.search + '\u201d';
@@ -1013,6 +1018,7 @@
       html += msgSections('biz');
       html += section('Completed today', doneToday, { key: 'myday', showList: true });
       if (!over.length && !today.length && !added.length && !S.tasks.some(t => isMsg(t) && t.person)) html = empty('Nothing planned for today', 'Tap the sun on any task to add it here, or type "today" in the box above.') + html;
+      html = koMyDay() + html;
     } else if (v === 'upcoming') {
       title = 'Upcoming'; sub = 'Next two weeks';
       const over = sortTasks(o.filter(t => t.due && t.due < T));
@@ -1077,6 +1083,9 @@
     } else if (v === 'payments') {
       if (!PAY_ON) { ui.view = 'myday'; return renderMain(); }
       ({ title, sub, html, actions } = renderPayments());
+    } else if (v === 'korean') {
+      if (!KO_ON) { ui.view = 'myday'; return renderMain(); }
+      ({ title, sub, html, actions } = renderKorean());
     } else if (v === 'jlink') {
       ({ title, sub, html, actions } = renderLinkPage(ui.jlink || ''));
     } else if (v === 'trash') {
@@ -1090,7 +1099,7 @@
           '<button type="button" class="chipbtn" data-restore-list="' + l.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-list="' + l.id + '">Delete forever</button></div>';
       }).join('') + '</div></div>';
       if (tt.length) html += '<div class="section"><div class="section-head">Tasks <span class="n">' + tt.length + '</span></div><div class="tasks">' + tt.map(t =>
-        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isPay(t) ? 'Payment' + (payOf(t) ? ': ' + payOf(t).payee + ', ' + money(payOf(t).amount) : ' (locked)') : isPaper(t) ? noteTitle(t) : unbr(t.title)) + '</div><div class="tmeta"><span>' + (isPay(t) ? 'Payments' : isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
+        '<div class="task trow"><span class="check ghostcheck"></span><div class="tbody static"><div class="ttitle">' + esc(isKo(t) ? t.title : isPay(t) ? 'Payment' + (payOf(t) ? ': ' + payOf(t).payee + ', ' + money(payOf(t).amount) : ' (locked)') : isPaper(t) ? noteTitle(t) : unbr(t.title)) + '</div><div class="tmeta"><span>' + (isKo(t) ? 'Korean card' : isPay(t) ? 'Payments' : isPaper(t) ? (isDoc(t) ? 'Document' : 'Note') : 'From ' + esc(listName(t.listId))) + '</span><span>Deleted ' + ago(t.deletedAt) + '</span><span>' + daysLeft(t.deletedAt) + ' days left</span></div></div>' +
         '<button type="button" class="chipbtn" data-restore-task="' + t.id + '">' + I.restore + 'Restore</button><button type="button" class="danger-btn" data-forever-task="' + t.id + '">Delete forever</button></div>').join('') + '</div></div>';
       if (!tl.length && !tt.length) html = empty('Nothing here', 'Deleted tasks and lists wait here for ' + TRASH_DAYS + ' days, in case you change your mind.');
       else actions = '<button type="button" class="chipbtn" data-empty-trash="1">Empty now</button>';
@@ -1135,6 +1144,8 @@
     $('#content').classList.toggle('calview', v === 'calendar' && !ui.search);
     const onNotes = (paperView(v) || v === 'journal' || v === 'jlink') && !ui.search; if (v !== 'docs') ui.docSel = null;
     document.body.classList.toggle('onpay', v === 'payments' && !ui.search);
+    const onKo = v === 'korean' && !ui.search; document.body.classList.toggle('onko', onKo); document.body.classList.toggle('koreview', onKo && !!(ui.ko && ui.ko.q));
+    if (KO_ON && !ui.qaEvent) { $('#qa').placeholder = onKo ? (isPhone() ? 'Add a Korean card' : 'Add a card: 어차피 = anyway | the line you heard #show') : (isPhone() ? 'Add a task' : 'Add a task, e.g. dentist fri 3pm'); updatePreview(); }
     $('#content').classList.toggle('notesview', onNotes); document.body.classList.toggle('onnotes', onNotes);
     if (onNotes) { masonry(); hydrate($('#content')); requestAnimationFrame(() => { if (paperView(ui.view) && !ui.search) { masonry(); } }); }
   }
@@ -1751,10 +1762,12 @@
     const v = $('#qa').value.trim(), el = $('#qaPreview');
     el.classList.toggle('idle', !v && !ui.qaEvent);
     if (!v && ui.qaEvent) { el.innerHTML = 'Adding an <b>event</b>' + (ui.qaDate ? ' on ' + esc(D.dueLabel(ui.qaDate)) : '') + '. It shows on your calendar without a checkbox. <button type="button" class="example" id="qaTaskMode">Add a task instead</button>'; return; }
+    if (!v && KO_ON && ui.view === 'korean' && !ui.search) { el.innerHTML = 'Try <button type="button" class="example" data-ex="막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix">막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix</button>'; return; }
     if (!v) {
       el.innerHTML = 'Try <button type="button" class="example" data-ex="Pay rent every month on the 1st 9am">Pay rent every month on the 1st 9am</button> or <button type="button" class="example" data-ex="Call mom tomorrow 6pm">Call mom tomorrow 6pm</button>';
       return;
     }
+    if (KO_ON && !ui.qaEvent && (/^ko\s*:/i.test(v) || (ui.view === 'korean' && !ui.search))) { el.innerHTML = koPreview(v); return; }
     const p = quickParse(v);
     const icon = { date: I.cal, recur: I.repeat, list: I.folder, warn: I.x, rem: I.bell, tag: I.tag, start: I.up, event: I.star };
     const defaultList = currentDefaultList();
@@ -1769,6 +1782,7 @@
   function addFromQuick() {
     const inp = $('#qa'), v0 = inp.value.trim();
     if (!v0) return;
+    if (KO_ON && !ui.qaEvent && (/^ko\s*:/i.test(v0) || (ui.view === 'korean' && !ui.search)) && koQuick(v0)) return;
     const wt = parseWaiting(v0), v = wt ? wt.rest : v0;
     const p = quickParse(v);
     const listId = p.isEvent ? 'inbox' : (p.listId || currentDefaultList().id);
@@ -2833,6 +2847,276 @@
     touchNote(raw); save(); render(); uploadPending(); toast('No longer locked');
   }
 
+
+  /* ---------- Korean flashcards (original site only, like Payments; api/_cfg.js features 'korean') ----------
+     Each card is an item with type:'kocard': title = the Korean, ko = { back, ex, src, note, hits, rev, s, s2 }.
+     s is the schedule Korean → meaning, s2 meaning → Korean (only when rev is on). See src/korean.js.
+     One item type:'kocfg' holds the settings and the daily review log, so streaks follow you between devices. */
+  const K = window.TallyKo;
+  const koCards = () => S.tasks.filter(isKo);
+  const koByFront = front => koCards().find(c => K.sameFront(c.title, front));
+  function koCfg(create) {
+    let c = S.tasks.filter(t => t.type === 'kocfg').sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (!c && create) c = newTask({ type: 'kocfg', title: 'Korean settings', cfg: {} });
+    const d = { newPerDay: 10, listen: false, autoplay: true, slow: false, log: {} };
+    return c ? Object.assign(d, c.cfg, { item: c }) : d;
+  }
+  function koSetCfg(patch) { const c = koCfg(true).item; c.cfg = Object.assign({}, c.cfg, patch); }
+  function koLogAdd(isNew) {
+    const T = todayISO(), cfg = koCfg(true), log = Object.assign({}, cfg.log), day = Object.assign({ r: 0, n: 0 }, log[T]);
+    day.r++; if (isNew) day.n++; log[T] = day;
+    Object.keys(log).sort().slice(0, -180).forEach(k => delete log[k]); // keep about six months
+    koSetCfg({ log });
+  }
+  // What's waiting today: reviews that are due, plus new cards up to the daily limit
+  function koToday() {
+    const T = todayISO(), cfg = koCfg(), cs = koCards().sort((a, b) => a.createdAt - b.createdAt);
+    const due = [], fresh = [];
+    for (const c of cs) {
+      const k = c.ko || {};
+      if (K.isDue(k.s, T)) due.push({ id: c.id, dir: 1 }); else if (K.isNewCard(k.s)) fresh.push({ id: c.id, dir: 1 });
+      if (k.rev && k.s && k.s.reps) { if (K.isDue(k.s2, T)) due.push({ id: c.id, dir: 2 }); else if (K.isNewCard(k.s2)) fresh.push({ id: c.id, dir: 2 }); }
+    }
+    const left = Math.max(0, cfg.newPerDay - ((cfg.log[T] || {}).n || 0));
+    return { due, fresh: fresh.slice(0, left), freshAll: fresh.length };
+  }
+  const koCount = () => { if (!KO_ON) return 0; const t = koToday(); return t.due.length + t.fresh.length; };
+  function koStart() {
+    const t = koToday();
+    const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    ui.ko.q = shuffle(t.due).concat(t.fresh); ui.ko.done = 0; ui.ko.total = ui.ko.q.length; ui.ko.shown = false; ui.ko.textOn = false;
+    ui.ko.tab = 'home';
+    renderMain(); koAuto();
+  }
+  function koStop() { ui.ko.q = null; if ('speechSynthesis' in window) speechSynthesis.cancel(); renderMain(); }
+  const koCur = () => { while (ui.ko.q && ui.ko.q.length && !taskById(ui.ko.q[0].id)) ui.ko.q.shift(); return ui.ko.q && ui.ko.q[0]; };
+  function koGrade(g) {
+    const cur = koCur(); if (!cur || !ui.ko.shown) return;
+    const c = taskById(cur.id), key = cur.dir === 2 ? 's2' : 's', was = (c.ko || {})[key];
+    const isNew = K.isNewCard(was);
+    c.ko = Object.assign({}, c.ko, { [key]: K.grade(was, g, todayISO()) });
+    koLogAdd(isNew);
+    ui.ko.q.shift();
+    if (g === 1) ui.ko.q.push(cur); else ui.ko.done++;
+    ui.ko.shown = false; ui.ko.textOn = false;
+    save(); renderSide(); renderMain(); koAuto();
+  }
+  /* ---- audio: the device's own Korean voice ---- */
+  const koVoice = () => { try { return speechSynthesis.getVoices().find(v => /^ko/i.test(v.lang)) || null; } catch (e) { return null; } };
+  function koSpeak(text) {
+    if (!text || !('speechSynthesis' in window)) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR';
+      const v = koVoice(); if (v) u.voice = v;
+      u.rate = koCfg().slow ? 0.7 : 1;
+      speechSynthesis.speak(u);
+    } catch (e) { }
+  }
+  function koAuto() { // play the Korean on its own when a card comes up (Korean → meaning cards only)
+    const cur = koCur(), cfg = koCfg(); if (!cur || cur.dir !== 1 || !(cfg.autoplay || cfg.listen)) return;
+    const c = taskById(cur.id); setTimeout(() => koSpeak(cfg.listen && c.ko && c.ko.ex ? c.ko.ex : c.title), 150);
+  }
+  // The card's word, underlined in its example sentence (also when the word is a verb like 서운하다 → 서운해서)
+  function koMark(ex, front) {
+    const e = String(ex || ''); if (!e) return '';
+    const tries = [front, front.replace(/하다$|다$/, ''), front.split(' ')[0].replace(/다$/, '')].filter(x => x && x.length >= 1);
+    for (const w of tries) { const i = e.indexOf(w); if (i >= 0) return esc(e.slice(0, i)) + '<mark>' + esc(e.slice(i, i + w.length)) + '</mark>' + esc(e.slice(i + w.length)); }
+    return esc(e);
+  }
+  function renderKorean() {
+    ui.ko = ui.ko || { tab: 'home', q: null };
+    const cfg = koCfg(), cs = koCards(), T = todayISO();
+    const tabs = '<div class="seg ko-tabs" role="group" aria-label="Korean"><button type="button" data-kotab="home" aria-pressed="' + (ui.ko.tab !== 'cards') + '">Review</button><button type="button" data-kotab="cards" aria-pressed="' + (ui.ko.tab === 'cards') + '">Cards <span class="n">' + cs.length + '</span></button></div>';
+    const actions = '<button type="button" class="chipbtn" data-koadd="1">' + I.plus + 'Card</button>';
+    if (ui.ko.q) return { title: 'Korean', sub: 'Review', html: koReviewHtml(), actions: '' };
+    if (ui.ko.tab === 'cards') return { title: 'Korean', sub: cs.length + ' card' + (cs.length === 1 ? '' : 's'), html: tabs + koListHtml(cs), actions };
+    const td = koToday(), n = td.due.length + td.fresh.length, st = K.streak(cfg.log, T), heard = cs.reduce((a, c) => a + ((c.ko || {}).hits || 0), 0);
+    const doneToday = (cfg.log[T] || {}).r || 0;
+    let h = tabs + '<div class="ko-home">';
+    h += '<div class="ko-stats"><div class="pcard"><small>To review</small><b>' + td.due.length + '</b><em>' + td.fresh.length + ' new</em></div><div class="pcard"><small>Streak</small><b>' + st + '</b><em>day' + (st === 1 ? '' : 's') + (doneToday ? ' · ' + doneToday + ' today' : '') + '</em></div><div class="pcard"><small>Cards</small><b>' + cs.length + '</b><em>' + heard + ' tally mark' + (heard === 1 ? '' : 's') + '</em></div></div>';
+    if (!cs.length) h += '<div class="ko-go"><p><b>No cards yet.</b> Add words you didn’t catch while watching, or start with the starter set: ' + K.STARTER.length + ' words heritage speakers often half-know, plus news and formal words.</p><div class="ko-row"><button type="button" class="chipbtn solid" data-kostarter="1">Add the starter set</button><button type="button" class="chipbtn" data-koadd="1">' + I.plus + 'Add a card</button><button type="button" class="chipbtn" data-kobulk="1">Paste a list…</button></div></div>';
+    else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min · Space shows the answer, 1–4 to rate</span></div>';
+    else h += '<div class="ko-go"><p><b>All caught up for today.</b> ' + (td.freshAll ? td.freshAll + ' new card' + (td.freshAll === 1 ? '' : 's') + ' waiting for tomorrow (' + cfg.newPerDay + ' a day). ' : '') + 'Add the words you didn’t catch tonight and they’ll show up tomorrow.</p>' + (td.freshAll ? '<button type="button" class="chipbtn" data-komore="1">Learn 5 more now</button>' : '') + '</div>';
+    if (cs.length) {
+      h += '<div class="ko-opts"><label class="ko-chk"><input type="checkbox" data-kocfg="listen"' + (cfg.listen ? ' checked' : '') + '> Listening mode <span class="hint">hear the sentence first, then show the text</span></label>' +
+        '<label class="ko-chk"><input type="checkbox" data-kocfg="autoplay"' + (cfg.autoplay ? ' checked' : '') + '> Play the Korean on each card</label>' +
+        '<label class="ko-chk"><input type="checkbox" data-kocfg="slow"' + (cfg.slow ? ' checked' : '') + '> Slower voice</label>' +
+        '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>';
+      if (!koVoice()) h += '<p class="hint ko-novoice">No Korean voice on this device yet, so cards are silent. On Windows: Settings → Time &amp; language → Speech → Add voices → Korean. Edge usually has one built in.</p>';
+    }
+    h += '<div class="ko-tip"><p><b>Caught something while watching?</b> Type it in the box above: here as is, or from any other page with <code>ko:</code> in front.</p><p><code lang="ko">ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game</code></p><p>The Korean, then <code>=</code> the meaning, <code>|</code> the line you heard, <code>#</code> where you heard it. Only the Korean is needed. Type a word you already have and it gets a tally mark instead.</p>' +
+      (cs.length ? '<div class="ko-row"><button type="button" class="chipbtn" data-kobulk="1">Paste a list…</button>' + (cs.some(c => (c.ko || {}).src === 'Starter set') ? '' : '<button type="button" class="chipbtn" data-kostarter="1">Add the starter set</button>') + '</div>' : '') + '</div>';
+    const recent = cs.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+    if (recent.length) h += '<div class="section-head">Recently added</div>' + koListHtml(recent, true);
+    h += '</div>';
+    return { title: 'Korean', sub: n ? n + ' to review' : 'All caught up', html: h, actions };
+  }
+  function koReviewHtml() {
+    const cur = koCur(), cfg = koCfg();
+    if (!cur) {
+      const st = K.streak(cfg.log, todayISO());
+      return '<div class="ko-done"><strong>Done for today</strong><p>' + ui.ko.done + ' card' + (ui.ko.done === 1 ? '' : 's') + ' reviewed' + (st ? ' · ' + st + '-day streak' : '') + '.</p><button type="button" class="chipbtn solid" data-kostop="1">Back to Korean</button></div>';
+    }
+    const c = taskById(cur.id), k = c.ko || {}, rev = cur.dir === 2, sched = rev ? k.s2 : k.s, shown = ui.ko.shown;
+    const hideText = cfg.listen && !rev && !shown && !ui.ko.textOn;
+    const left = ui.ko.q.length, pct = ui.ko.total ? Math.round(100 * ui.ko.done / (ui.ko.done + left)) : 0;
+    let h = '<div class="ko-review"><div class="ko-bar"><span>' + left + ' left' + (K.isNewCard(sched) ? ' · <b>new</b>' : '') + ' · ' + (rev ? 'English → Korean' : 'Korean → English') + '</span><span class="spacer"></span><button type="button" class="linkbtn" data-kostop="1">Stop</button></div><div class="ko-prog"><i style="width:' + pct + '%"></i></div>';
+    h += '<div class="ko-card' + (shown ? ' shown' : '') + '">';
+    if (rev) h += '<div class="ko-front en">' + esc(k.back || '(no meaning yet)') + '</div>';
+    else if (hideText) h += '<div class="ko-listen"><button type="button" class="ko-play big" data-kosay="' + esc(k.ex || c.title) + '" aria-label="Play again">' + I.ko + '</button><button type="button" class="linkbtn" data-kotext="1">Show the text</button></div>';
+    else h += '<div class="ko-front" lang="ko">' + esc(c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(c.title) + '" aria-label="Say it" title="Say it">' + I.ko + '</button></div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(k.ex) + '" aria-label="Say the sentence" title="Say the sentence">' + I.ko + '</button></div>' : '');
+    if (shown) {
+      h += '<div class="ko-ans">';
+      if (rev) h += '<div class="ko-front" lang="ko">' + esc(c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(c.title) + '" aria-label="Say it">' + I.ko + '</button></div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + '</div>' : '');
+      else h += '<div class="ko-mean">' + (k.back ? esc(k.back) : '<span class="hint">No meaning yet. Click Edit to add one.</span>') + '</div>';
+      if (k.note) h += '<div class="ko-note">' + esc(k.note) + '</div>';
+      h += '</div>';
+    }
+    h += '<div class="ko-meta">' + (k.src ? '<span>' + I.tag + esc(k.src) + '</span>' : '') + (k.hits ? '<span>Heard ' + k.hits + '×</span>' : '') + '<span class="spacer"></span><button type="button" class="linkbtn" data-kohit="' + c.id + '" title="You heard it again somewhere">+ Heard it</button><button type="button" class="linkbtn" data-koedit="' + c.id + '">Edit</button></div></div>';
+    if (!shown) h += '<div class="ko-acts"><button type="button" class="chipbtn solid big" data-koshow="1">Show answer <kbd>Space</kbd></button></div>';
+    else {
+      const t = todayISO(), lbl = g => K.ivlLabel(K.grade(sched, g, t).ivl);
+      h += '<div class="ko-acts grades">' + [[1, 'Again'], [2, 'Hard'], [3, 'Good'], [4, 'Easy']].map(([g, n]) => '<button type="button" class="ko-g g' + g + '" data-kog="' + g + '"><b>' + n + '</b><small>' + lbl(g) + '</small><kbd>' + g + '</kbd></button>').join('') + '</div>';
+    }
+    return h + '</div>';
+  }
+  function koListHtml(cs, compact) {
+    const T = todayISO();
+    let xs = cs;
+    if (!compact) {
+      const q = (ui.ko.find || '').trim().toLowerCase();
+      if (q) xs = cs.filter(c => (c.title + ' ' + ((c.ko || {}).back || '') + ' ' + ((c.ko || {}).ex || '') + ' ' + ((c.ko || {}).src || '')).toLowerCase().includes(q));
+      xs = xs.slice().sort((a, b) => b.createdAt - a.createdAt);
+    }
+    const next = s => !s || !s.due ? 'New' : s.due <= T ? 'Due now' : K.diffDays(s.due, T) === 1 ? 'Tomorrow' : 'In ' + K.ivlLabel(K.diffDays(s.due, T));
+    let h = compact ? '' : '<input class="ctl ko-find" id="koFind" placeholder="Filter cards: Korean, meaning, sentence or show" value="' + esc(ui.ko.find || '') + '" aria-label="Filter cards">';
+    if (!xs.length) return h + (compact ? '' : empty(cs.length ? 'No matches' : 'No cards yet', cs.length ? 'Try a different word.' : 'Type a word in the box above to add your first card.'));
+    h += '<div class="tasks ko-list">' + xs.map(c => {
+      const k = c.ko || {};
+      return '<div class="task ko-item"><div class="tbody" data-koedit="' + c.id + '" role="button" tabindex="0"><div class="ttitle"><span lang="ko">' + esc(c.title) + '</span>' + (k.back ? ' <span class="ko-dim">· ' + esc(k.back) + '</span>' : '') + '</div><div class="tmeta">' + (k.ex ? '<span lang="ko">' + esc(trunc(k.ex, 60)) + '</span>' : '') + (k.src ? '<span>' + I.tag + esc(k.src) + '</span>' : '') + '<span>' + next(k.s) + '</span>' + (k.rev ? '<span>Both ways</span>' : '') + (k.hits ? '<span>Heard ' + k.hits + '×</span>' : '') + '</div></div>' +
+        '<button type="button" class="iconbtn" data-kosay="' + esc(c.title) + '" aria-label="Say it" title="Say it">' + I.ko + '</button><button type="button" class="chipbtn" data-kohit="' + c.id + '" title="You heard it again somewhere">+1</button></div>';
+    }).join('') + '</div>';
+    return h;
+  }
+  /* ---- adding and editing ---- */
+  function koAdd(p, quiet) {
+    const have = koByFront(p.front);
+    if (have) {
+      const k = Object.assign({}, have.ko); k.hits = (k.hits || 0) + 1;
+      if (!k.back && p.back) k.back = p.back; if (!k.ex && p.ex) k.ex = p.ex; if (!k.src && p.src) k.src = p.src;
+      have.ko = k; return { card: have, dup: true };
+    }
+    const card = newTask({ type: 'kocard', title: p.front, ko: { back: p.back || '', ex: p.ex || '', src: p.src || '', note: p.note || '', hits: 0, rev: !!p.rev, s: null, s2: null } });
+    return { card, dup: false };
+  }
+  function koQuick(v) {
+    const p = K.parseLine(v); if (!p) return false;
+    snapshot(); const r = koAdd(p); save(); $('#qa').value = ''; updatePreview(); render();
+    toast(r.dup ? 'Already a card: ' + r.card.title + ' · heard ' + r.card.ko.hits + '×' : 'Card added: ' + r.card.title + (r.card.ko.back ? '' : ' (add the meaning any time)'), true);
+    return true;
+  }
+  function koPreview(v) {
+    const p = K.parseLine(v);
+    if (!p) return '<span class="hint">Type the Korean, then = meaning | the sentence #where</span>';
+    const have = koByFront(p.front);
+    return '<span class="tok list" style="background:transparent;padding-left:0" lang="ko">' + esc(trunc(p.front, 40)) + '</span>' + (p.back ? '<span class="tok">' + esc(trunc(p.back, 40)) + '</span>' : '') + (p.ex ? '<span class="tok list" lang="ko">' + esc(trunc(p.ex, 40)) + '</span>' : '') + (p.src ? '<span class="tok tag">' + I.tag + esc(p.src) + '</span>' : '') + '<span class="hint">' + (have ? 'Already a card: Enter adds a tally mark' : 'Enter to add a Korean card') + '</span>';
+  }
+  function koForm(id) {
+    const c = id && taskById(id), k = (c && c.ko) || {};
+    const f = (lbl, key, val, ph, lang) => '<label class="field"><span class="field-label">' + lbl + '</span><input class="ctl" id="ko_' + key + '" value="' + esc(val || '') + '" placeholder="' + esc(ph) + '"' + (lang ? ' lang="ko"' : '') + '></label>';
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="koTitle"><div class="sheet-head"><h2 id="koTitle">' + (c ? 'Edit card' : 'New Korean card') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body ko-form">' +
+      f('Korean', 'front', c && c.title, 'e.g. 어차피', true) + f('Meaning', 'back', k.back, 'e.g. anyway, in any case') + f('The line you heard (optional)', 'ex', k.ex, 'e.g. 어차피 늦었으니까 천천히 가자', true) + f('Where (optional)', 'src', k.src, 'e.g. Squid Game ep 2, a YouTube vlog') +
+      '<label class="field"><span class="field-label">Note (optional)</span><textarea class="ctl" id="ko_note" rows="2" placeholder="How it’s used, a nuance, a related word">' + esc(k.note || '') + '</textarea></label>' +
+      '<label class="ko-chk"><input type="checkbox" id="ko_rev"' + (k.rev ? ' checked' : '') + '> Also practice English → Korean <span class="hint">for words you want to start using</span></label>' +
+      (c ? '<p class="hint">' + (k.s && k.s.due ? 'Next review: ' + esc(D.dueLabel(k.s.due)) + ' · reviewed ' + (k.s.reps || 0) + '× · forgot ' + (k.s.lapses || 0) + '×' : 'Not reviewed yet') + '</p>' : '') +
+      '<div class="ko-row">' + (c ? '<button type="button" class="danger-btn" data-kodel="' + c.id + '">Delete card</button>' + (k.s && k.s.due ? '<button type="button" class="chipbtn" data-koreset="' + c.id + '" title="Start this card over as new">Start over</button>' : '') : '') + '<span class="spacer"></span><button type="button" class="chipbtn" data-close="1">Cancel</button><button type="button" class="chipbtn solid" data-kosave="' + (c ? c.id : '') + '">Save</button></div></div></div>';
+    $('#sheet').hidden = false; $('#ko_' + (c ? 'back' : 'front')).focus();
+  }
+  function koSave(id) {
+    const front = $('#ko_front').value.trim(); if (!front) { $('#ko_front').focus(); return; }
+    const vals = { back: $('#ko_back').value.trim(), ex: $('#ko_ex').value.trim(), src: $('#ko_src').value.trim(), note: $('#ko_note').value.trim(), rev: $('#ko_rev').checked };
+    snapshot();
+    if (id) { const c = taskById(id); if (!c) return; c.title = front; c.ko = Object.assign({}, c.ko, vals); toast('Card saved', true); }
+    else { const dup = koByFront(front); if (dup) { toast('You already have ' + dup.title + '. Opened it instead.'); koForm(dup.id); return; } koAdd(Object.assign({ front }, vals)); toast('Card added: ' + front, true); }
+    save(); closeSheet(); render();
+  }
+  function koBulkForm() {
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="kbTitle"><div class="sheet-head"><h2 id="kbTitle">Paste a list of words</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body ko-form">' +
+      '<p>One word or phrase per line. Each line works like the add box: <code lang="ko">하필 = of all days | 왜 하필 오늘이야 #Netflix</code>. Columns copied from a spreadsheet or exported from Language Reactor or Anki also work (Korean, meaning, sentence, separated by tabs).</p>' +
+      '<textarea class="ctl" id="koBulk" rows="10" lang="ko" placeholder="어쩐지 = no wonder&#10;괜히 = for no reason&#10;막상"></textarea><p class="hint" id="koBulkMsg"></p>' +
+      '<div class="ko-row"><span class="spacer"></span><button type="button" class="chipbtn" data-close="1">Cancel</button><button type="button" class="chipbtn solid" data-kobulkgo="1">Add cards</button></div></div></div>';
+    $('#sheet').hidden = false; $('#koBulk').focus();
+  }
+  function koAddMany(list, label) {
+    snapshot(); let added = 0, dup = 0;
+    list.forEach(p => { if (koByFront(p.front)) dup++; else { koAdd(p); added++; } });
+    save(); render();
+    toast(added + ' card' + (added === 1 ? '' : 's') + ' added' + (label ? ' from the ' + label : '') + (dup ? ' · ' + dup + ' you already had' : ''), true);
+  }
+  function koMyDay() {
+    if (!KO_ON) return '';
+    const n = koCount(); if (!n) return '';
+    return '<div class="ko-nudge"><span class="ko-badge" lang="ko">한</span><div><b>Korean</b><span>' + n + ' card' + (n === 1 ? '' : 's') + ' to review · about ' + Math.max(1, Math.round(n * 8 / 60)) + ' min</span></div><span class="spacer"></span><button type="button" class="chipbtn solid" data-kogo="1">Review</button></div>';
+  }
+  function bindKorean() {
+    if (!KO_ON) return;
+    ui.ko = ui.ko || { tab: 'home', q: null };
+    try { speechSynthesis.onvoiceschanged = () => { if (ui.view === 'korean' && !ui.ko.q) renderMain(); }; } catch (e) { }
+    $('#content').addEventListener('click', e => {
+      const go = e.target.closest('[data-kogo]'); if (go) { setView('korean'); koStart(); return; }
+      if (ui.view !== 'korean') {
+        const say = e.target.closest('[data-kosay]'); if (say) koSpeak(say.dataset.kosay);
+        return;
+      }
+      const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-kog],[data-kosay],[data-kotext],[data-kohit],[data-koedit],[data-koadd],[data-kobulk],[data-kostarter],[data-komore]'); if (!b) return;
+      const d = b.dataset;
+      if (d.kotab) { ui.ko.tab = d.kotab; renderMain(); return; }
+      if (d.kostart) return koStart();
+      if (d.kostop) return koStop();
+      if (d.koshow) { ui.ko.shown = true; renderMain(); return; }
+      if (d.kog) return koGrade(Number(d.kog));
+      if (d.kosay !== undefined) { e.stopPropagation(); koSpeak(d.kosay); return; }
+      if (d.kotext) { ui.ko.textOn = true; renderMain(); return; }
+      if (d.kohit) { const c = taskById(d.kohit); if (!c) return; snapshot(); c.ko = Object.assign({}, c.ko, { hits: ((c.ko || {}).hits || 0) + 1 }); save(); renderMain(); toast('Tallied: ' + c.title + ' · heard ' + c.ko.hits + '×', true); return; }
+      if (d.koedit) return koForm(d.koedit);
+      if (d.koadd) return koForm(null);
+      if (d.kobulk) return koBulkForm();
+      if (d.kostarter) return koAddMany(K.STARTER, 'starter set');
+      if (d.komore) { const c = koCfg(), T = todayISO(), log = Object.assign({}, c.log); log[T] = Object.assign({ r: 0, n: 0 }, log[T]); log[T].n = Math.max(0, log[T].n - 5); koSetCfg({ log }); save(); koStart(); return; }
+    });
+    $('#content').addEventListener('keydown', e => { if (ui.view === 'korean' && e.key === 'Enter' && e.target.matches('[data-koedit]')) koForm(e.target.dataset.koedit); });
+    $('#content').addEventListener('input', e => { if (e.target.id === 'koFind') { ui.ko.find = e.target.value; const pos = e.target.selectionStart; renderMain(); const f = $('#koFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
+    $('#content').addEventListener('change', e => {
+      const k = e.target.dataset && e.target.dataset.kocfg; if (!k) return;
+      koSetCfg({ [k]: e.target.type === 'checkbox' ? e.target.checked : Number(e.target.value) }); save(); renderSide(); renderMain();
+    });
+    $('#sheet').addEventListener('click', e => {
+      const s = e.target.closest('[data-kosave]'); if (s) return koSave(s.dataset.kosave);
+      const del = e.target.closest('[data-kodel]'); if (del) { const c = taskById(del.dataset.kodel); if (!c) return; snapshot(); trashTask(c); save(); closeSheet(); render(); toast('Card moved to Recently deleted', true); return; }
+      const rs = e.target.closest('[data-koreset]'); if (rs) { const c = taskById(rs.dataset.koreset); if (!c) return; snapshot(); c.ko = Object.assign({}, c.ko, { s: null, s2: null }); save(); closeSheet(); render(); toast('Card starts over as new', true); return; }
+      if (e.target.closest('[data-kobulkgo]')) {
+        const list = K.parseBulk($('#koBulk').value);
+        if (!list.length) { $('#koBulkMsg').textContent = 'Nothing to add yet. Put one word per line.'; return; }
+        closeSheet(); koAddMany(list); return;
+      }
+    });
+    $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.ko-form input.ctl')) { e.preventDefault(); const s = $('[data-kosave]'); if (s) koSave(s.dataset.kosave); } });
+    // Review keys: Space or Enter shows the answer, 1–4 rate it, R plays it again
+    document.addEventListener('keydown', e => {
+      if (ui.view !== 'korean' || !ui.ko.q || !$('#sheet').hidden || ui.search || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+      const cur = koCur(); if (!cur) return;
+      let hit = true;
+      if ((e.key === ' ' || e.key === 'Enter') && !ui.ko.shown) { ui.ko.shown = true; renderMain(); }
+      else if (e.key === ' ' && ui.ko.shown) koGrade(3);
+      else if (/^[1-4]$/.test(e.key) && ui.ko.shown) koGrade(Number(e.key));
+      else if (e.key === 'r' || e.key === 'R') { const c = taskById(cur.id); koSpeak(koCfg().listen && c.ko.ex && !ui.ko.shown ? c.ko.ex : c.title); }
+      else if (e.key === 'Escape') koStop();
+      else hit = false;
+      if (hit) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+  }
 
   /* ---------- Payments (original site only): a private log of payments, payroll and a cash forecast ----------
      Each payment is an item with type:'payment'; the roster, repeating payments and bank balance are one item 'paycfg'.
@@ -5958,7 +6242,7 @@
   });
   setTimeout(() => refreshOutlook(), 1500); setInterval(() => refreshOutlook(), 30 * 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOutlook(); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); bindPay(); bindMsgs(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); bindPay(); bindKorean(); bindMsgs(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }

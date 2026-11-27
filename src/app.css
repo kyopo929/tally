@@ -1373,3 +1373,87 @@ details.bcok { margin-top: 14px; } details summary { cursor: pointer; }
 .msg-btns .chipbtn svg { width: 13px; height: 13px; }
 @media (max-width: 600px) { .msg-text, .msg-btns, .msg-more { margin-left: 0; } .msg-btns .chipbtn { padding: 7px 12px; font-size: 13px; } }
 .msg-text a { color: var(--accent); }
+
+/* Korean flashcards (original site only) */
+.ico-ko { color: #c4372c; }
+.ko-glyph { display: inline-grid; place-items: center; width: 16px; height: 16px; font: 700 13px/1 "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
+[lang="ko"] { font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", var(--font-body); word-break: keep-all; }
+body.onko .qamode { display: none; }
+body.koreview .qa-wrap { display: none; }
+.ko-tabs { max-width: 260px; margin: 14px 0 4px; }
+.ko-tabs .n { color: var(--muted); font-weight: 500; }
+.ko-home { display: grid; gap: 14px; max-width: 760px; margin-top: 10px; }
+.ko-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ko-go { display: grid; gap: 8px; justify-items: start; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.ko-go p { margin: 0; max-width: 62ch; }
+.ko-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ko-row .spacer { flex: 1; }
+.chipbtn.big { font-size: 15px; padding: 10px 20px; border-radius: 10px; }
+.chipbtn kbd, .ko-g kbd { font: 11px var(--font-body); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .6; margin-left: 6px; }
+.ko-opts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; }
+.ko-chk { display: inline-flex; align-items: center; gap: 7px; }
+.ko-chk select { width: auto; padding: 3px 6px; }
+.ko-chk .hint { margin-left: 2px; }
+.ko-novoice { margin: 0; }
+.ko-tip { font-size: 13px; color: var(--muted); padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.ko-tip p { margin: 0 0 6px; }
+.ko-tip b { color: var(--ink); }
+.ko-tip code, .ko-form code { font: 12.5px ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--bg); padding: 1px 6px; border-radius: 5px; }
+.ko-tip code[lang="ko"], .ko-form code[lang="ko"] { font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", monospace; }
+.ko-tip .ko-row { margin-top: 6px; }
+.ko-find { margin: 12px 0 10px; max-width: 420px; }
+.ko-list .ko-item { align-items: center; }
+.ko-dim { color: var(--muted); }
+.ko-list .chipbtn { padding: 3px 8px; }
+
+.ko-review { max-width: 640px; margin: 18px auto 40px; display: grid; gap: 14px; }
+.ko-bar { display: flex; align-items: center; font-size: 12.5px; color: var(--muted); }
+.ko-bar .spacer { flex: 1; }
+.ko-prog { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: -6px; }
+.ko-prog i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.ko-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 34px 28px 16px; display: grid; gap: 14px; text-align: center; min-height: 260px; align-content: center; }
+.ko-front { font-size: 34px; font-weight: 700; line-height: 1.25; display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.ko-front.en { font: 600 24px/1.35 var(--font-display); }
+.ko-ex { font-size: 18px; line-height: 1.6; color: var(--ink); display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.ko-ex mark { background: color-mix(in srgb, var(--sun) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+.ko-ans { border-top: 1px dashed var(--line); padding-top: 14px; display: grid; gap: 8px; }
+.ko-mean { font: 600 21px/1.4 var(--font-display); }
+.ko-note { color: var(--muted); font-size: 14px; white-space: pre-wrap; }
+.ko-meta { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.ko-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.ko-meta svg { width: 12px; height: 12px; }
+.ko-meta .spacer { flex: 1; }
+.ko-play { color: var(--accent); padding: 4px; border-radius: 8px; display: inline-grid; place-items: center; }
+.ko-play:hover { background: var(--accent-soft); }
+.ko-play svg { width: 20px; height: 20px; }
+.ko-play.big { width: 76px; height: 76px; border-radius: 50%; background: var(--accent-soft); }
+.ko-play.big svg { width: 34px; height: 34px; }
+.ko-listen { display: grid; justify-items: center; gap: 12px; }
+.ko-acts { display: flex; justify-content: center; }
+.ko-acts.grades { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ko-g { display: grid; justify-items: center; gap: 1px; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.ko-g b { font-weight: 600; }
+.ko-g small { font-size: 11.5px; color: var(--muted); }
+.ko-g kbd { margin: 2px 0 0; }
+.ko-g:hover { background: var(--hover); }
+.ko-g.g1 b { color: var(--danger); } .ko-g.g2 b { color: var(--p2); } .ko-g.g3 b { color: #2f9e5b; } .ko-g.g4 b { color: var(--accent); }
+.ko-done { text-align: center; padding: 60px 16px; display: grid; justify-items: center; gap: 6px; }
+.ko-done strong { font: 700 22px var(--font-display); }
+.ko-done p { margin: 0 0 8px; color: var(--muted); }
+.ko-form { display: grid; gap: 10px; padding-bottom: 18px; }
+.ko-form p { margin: 0; }
+.ko-nudge { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.ko-nudge > div { display: grid; }
+.ko-nudge span:not(.ko-badge):not(.spacer) { font-size: 12.5px; color: var(--muted); }
+.ko-nudge .spacer { flex: 1; }
+.ko-badge { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, #c4372c 14%, var(--surface)); color: #c4372c; font-weight: 700; font-size: 17px; }
+@media (max-width: 600px) {
+  .ko-stats { gap: 6px; }
+  .ko-stats .pcard { padding: 10px; }
+  .ko-card { padding: 26px 16px 12px; min-height: 220px; }
+  .ko-front { font-size: 28px; }
+  .ko-ex { font-size: 16px; }
+  .ko-acts.grades { gap: 6px; }
+  .ko-g kbd, .chipbtn kbd { display: none; }
+  .ko-review { margin-top: 8px; }
+}

@@ -9,10 +9,10 @@ function holidaysFor(req) {
   if (process.env.HOLIDAYS) return process.env.HOLIDAYS.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   return isOriginal(req) ? ['ae', 'us', 'kr'] : ['ae', 'us'];
 }
-// Extra sections only the original site shows: FEATURES="payments" turns one on for a copy. Default: the original gets payments, copies get none.
+// Extra sections only the original site shows: FEATURES="payments,korean" turns them on for a copy. Default: the original gets payments and korean, copies get none.
 function featuresFor(req) {
   if (process.env.FEATURES !== undefined) return process.env.FEATURES.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  return isOriginal(req) ? ['payments'] : [];
+  return isOriginal(req) ? ['payments', 'korean'] : [];
 }
 function isOriginal(req) {
   const host = String((req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '').toLowerCase();
