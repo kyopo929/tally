@@ -39,7 +39,15 @@ eq('streak counts back from today', K.streak({ '2026-11-28': { r: 3 }, '2026-11-
 eq('streak kept before today’s review', K.streak({ '2026-11-27': { r: 1 }, '2026-11-26': { r: 1 } }, T), 2);
 eq('streak broken', K.streak({ '2026-11-25': { r: 1 } }, T), 0);
 // word packs: every card complete, no card twice
-const PACKS = require('../src/korean-packs.js'), all = PACKS.flatMap(p => p.cards);
+const PACKS = require('../src/korean-packs.js'), all = PACKS.filter(p => p.cards).flatMap(p => p.cards);
+// the big dictionary packs (korean/*.json): every card has Korean and English, counts match, no word twice in a pack
+const fs = require('fs');
+for (const p of PACKS.filter(p => p.big)) {
+  const rows = JSON.parse(fs.readFileSync(__dirname + '/../' + p.url, 'utf8'));
+  eq(p.id + ' count', rows.length, p.count);
+  eq(p.id + ' complete', rows.filter(r => !r[0] || !r[1]).length, 0);
+  eq(p.id + ' no repeats', new Set(rows.map(r => r[0])).size, rows.length);
+}
 eq('packs complete', all.filter(c => !c.front || !c.back || !c.ex).map(c => c.front), []);
 eq('packs have no repeats', all.length, new Set(all.map(c => c.front.replace(/\s/g, ''))).size);
 
