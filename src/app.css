@@ -1482,3 +1482,9 @@ body.onko .qa-wrap { display: none; }
 .ko-addrow .chipbtn { display: inline-flex; align-items: center; gap: 4px; padding: 0 14px; }
 .ko-addrow .chipbtn svg { width: 14px; height: 14px; }
 @media (max-width: 760px) { .ko-addrow { grid-template-columns: 1fr 1fr; } .ko-addrow .ka-ex { grid-column: 1 / -1; grid-row: 2; } .ko-addrow .chipbtn { justify-content: center; padding: 9px; } }
+
+.ko-addrow .ka-hint { grid-column: 1 / -1; margin: 0; font-size: 12.5px; color: var(--muted); }
+.ko-addrow.pre { border-color: var(--accent); }
+.ko-bm { padding: 10px 12px; margin: 4px 0 10px; border-radius: 10px; background: var(--bg); }
+.ko-bm p { margin: 0 0 4px; }
+.ko-bmbtn { display: inline-block; padding: 3px 12px; border-radius: 99px; background: #c4372c; color: #fff; font-weight: 600; text-decoration: none; cursor: grab; margin: 0 4px; }

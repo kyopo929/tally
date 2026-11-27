@@ -2947,17 +2947,41 @@
         (left ? '<button type="button" class="chipbtn' + (have.size ? '' : ' solid') + '" data-kopack="' + p.id + '">Add ' + left + '</button>' : '<span class="ko-added">' + I.check + 'Added</span>') + '</div>';
     }).join('') + '</div>';
   }
+  /* ---- the "+ Tally" bookmark: on Netflix (or YouTube) it takes the subtitle on screen and the show's name and opens Tally with them filled in.
+     Netflix shows subtitles as text in .player-timedtext and the title in [data-uia=video-title]; YouTube captions are in .ytp-caption-window-container.
+     Text you've selected on any page wins. No % in the code: browsers decode javascript: links. ---- */
+  function koBookmarklet() {
+    return 'javascript:(()=>{const q=s=>document.querySelector(s),j=e=>e?e.innerText.replace(/\\s*\\n\\s*/g,\' \').trim():\'\';' +
+      'let t=String(getSelection()).trim()||j(q(\'.player-timedtext\'))||j(q(\'.ytp-caption-window-container\'));const v=q(\'video\');if(v)v.pause();' +
+      'if(!t){alert(\'Tally: no subtitle on screen. Turn on Korean subtitles and pause on the line.\');return}' +
+      'const tt=q(\'[data-uia=video-title]\');let s=(tt?[...tt.children].map(j).filter(Boolean).join(\' \')||j(tt):\'\')||(location.host.includes(\'youtube\')?j(q(\'h1.ytd-watch-metadata\'))||j(q(\'#title h1\')):\'\')||document.title.replace(/\\s*[-|]\\s*(Netflix|YouTube)\\s*$/i,\'\');' +
+      'window.open(' + JSON.stringify(location.origin + location.pathname).replace(/"/g, "'") + '+\'?ko=\'+encodeURIComponent(t)+\'&src=\'+encodeURIComponent(s.slice(0,120))+\'&from=\'+encodeURIComponent(location.host.includes(\'youtube\')?\'YouTube\':location.host.includes(\'netflix\')?\'Netflix\':location.host),\'tally\')})()';
+  }
+  function koFromLink() { // Tally opened by the bookmark: fill in the boxes
+    let qs; try { qs = new URLSearchParams(location.search); } catch (e) { return; }
+    const line = qs.get('ko'); if (line === null) return;
+    history.replaceState(null, '', location.pathname);
+    if (!KO_ON) return;
+    // the line without the dashes Netflix puts before each speaker
+    ui.ko.pre = { ex: line.replace(/\s+/g, ' ').replace(/(^|\s)[-–]\s+/g, '$1').trim().slice(0, 300), src: (qs.get('src') || '').trim().slice(0, 120), w: (qs.get('w') || '').trim().slice(0, 80), from: (qs.get('from') || 'the bookmark').slice(0, 40) };
+    ui.ko.q = null; ui.ko.tab = 'home'; setView('korean');
+    setTimeout(() => { const f = $('#kaFront'); if (f) f.focus(); }, 50);
+  }
   // Four boxes to add a card: Korean, English, the full line, the show. The show is kept for the next card.
   function koAddHtml() {
+    const pre = ui.ko.pre;
     const f = (id, ph, cls, lang, val) => '<input class="ctl ' + cls + '" id="' + id + '" placeholder="' + ph + '" autocomplete="off"' + (lang ? ' lang="ko"' : '') + ' value="' + esc(val || '') + '" aria-label="' + ph + '">';
-    return '<div class="ko-addrow">' + f('kaFront', 'Korean', 'ka-front', true) + f('kaBack', 'English', 'ka-back') + f('kaEx', 'The full line (optional)', 'ka-ex', true) + f('kaSrc', 'Show (optional)', 'ka-src', false, ui.ko.lastSrc) +
-      '<button type="button" class="chipbtn solid" data-kaadd="1">' + I.plus + 'Add</button></div>';
+    return '<div class="ko-addrow' + (pre ? ' pre' : '') + '">' + f('kaFront', 'Korean', 'ka-front', true, pre && pre.w) + f('kaBack', 'English', 'ka-back') + f('kaEx', 'The full line (optional)', 'ka-ex', true, pre && pre.ex) + f('kaSrc', 'Show (optional)', 'ka-src', false, pre ? pre.src : ui.ko.lastSrc) +
+      '<button type="button" class="chipbtn solid" data-kaadd="1">' + I.plus + 'Add</button>' +
+      (pre ? '<p class="ka-hint">From ' + esc(pre.from) + '. Type the word you didn’t catch and its meaning, or just press Enter to save the whole line. <button type="button" class="linkbtn" data-kapre="1">Cancel</button></p>' : '') + '</div>';
   }
   function koAddFromRow() {
     const v = id => ($('#' + id) ? $('#' + id).value.trim() : '');
-    const front = v('kaFront'); if (!front) { $('#kaFront').focus(); return; }
-    const p = { front, back: v('kaBack'), ex: v('kaEx'), src: v('kaSrc') };
-    ui.ko.lastSrc = p.src;
+    let front = v('kaFront'), ex = v('kaEx'); if (!front) front = ex; // nothing typed: the whole line is the card
+    if (!front) { $('#kaFront').focus(); return; }
+    if (ex === front) ex = '';
+    const p = { front, back: v('kaBack'), ex, src: v('kaSrc') };
+    ui.ko.lastSrc = p.src; ui.ko.pre = null;
     snapshot(); const r = koAdd(p); save(); render();
     toast(r.dup ? 'Already a card: ' + r.card.title + ' · heard ' + r.card.ko.hits + '×' : 'Card added: ' + r.card.title, true);
     const f = $('#kaFront'); if (f) f.focus();
@@ -2979,6 +3003,8 @@
     h += '<div class="ko-opts">' + koVoiceHtml() + '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30, 50].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>';
     h += '<div class="section-head">Word packs</div>' + koPackHtml(have);
     h += '<div class="section-head">Your own words</div><div class="ko-tip"><p><b>From YouTube, for free:</b> under a video click <b>…more</b> → <b>Show transcript</b>, select it all and copy, then <button type="button" class="linkbtn" data-kotr="1">paste the transcript</button>. Tap the lines you didn’t understand and they become cards. Subtitle files (.srt, .vtt) work too.</p>' +
+      '<div class="ko-bm"><p><b>From Netflix, one click:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows the bar): <a class="ko-bmbtn" href="' + esc(koBookmarklet()) + '" data-kobm="1" title="Drag me to your bookmarks bar">+ Tally</a> <button type="button" class="linkbtn" data-kobmcopy="1">or copy it</button></p>' +
+      '<p class="hint">Watch with Korean subtitles on. When you hear something you didn’t catch, pause, press Esc to leave full screen and click <b>+ Tally</b>. Tally opens with the line and the show filled in. It works on YouTube too, and on any page if you select some text first. Browser only, not the Netflix app or a phone.</p></div>' +
       '<p><b>While watching anything:</b> fill in the boxes at the top. Only the Korean is needed, and Enter adds it. A word you already have gets a tally mark instead. From another page of Tally you can also type <code lang="ko">ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game</code> in the main add box.</p>' +
       '<div class="ko-row"><button type="button" class="chipbtn" data-kotr="1">Paste a transcript…</button><button type="button" class="chipbtn" data-kobulk="1">Paste a word list…</button></div></div>';
     const recent = cs.filter(c => (c.ko || {}).src && !KO_PACKS.some(p => p.name === c.ko.src)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
@@ -3118,6 +3144,9 @@
     $('#content').addEventListener('click', e => {
       const go = e.target.closest('[data-kogo]'); if (go) { setView('korean'); koStart(); return; }
       if (e.target.closest('[data-kaadd]')) { koAddFromRow(); return; }
+      if (e.target.closest('[data-kapre]')) { ui.ko.pre = null; renderMain(); return; }
+      const bm = e.target.closest('[data-kobm]'); if (bm) { e.preventDefault(); toast('Drag this button up to your bookmarks bar. Clicking it here does nothing.'); return; }
+      if (e.target.closest('[data-kobmcopy]')) { try { navigator.clipboard.writeText(koBookmarklet()).then(() => toast('Copied. Make a new bookmark and paste this as its address.'), () => toast('Your browser blocked the clipboard here')); } catch (x) { toast('Your browser blocked the clipboard here'); } return; }
       if (ui.view !== 'korean') return;
       const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-koknow],[data-kog],[data-kosay],[data-kohit],[data-koedit],[data-kobulk],[data-kotr],[data-kopack],[data-komore]'); if (!b) return;
       const d = b.dataset;
@@ -6326,6 +6355,7 @@
     if (ch) { save(); render(); }
     autoExpiryScan(); expiredNotice(); }, 4000); setTimeout(weeklyBackup, 90000); setInterval(weeklyBackup, 3600000); setTimeout(weeklyLocal, 20000); setInterval(weeklyLocal, 3600000);
   if (/[?&]share=1/.test(location.search)) { history.replaceState(null, '', location.pathname); takeShared(); }
+  if (KO_ON && /[?&]ko=/.test(location.search)) koFromLink();
   startSync();
   })(); // end of start-up (waits for the saved data)
 })();
