@@ -10,6 +10,10 @@
   const isPay = t => !!t && t.type === 'payment';
   const KO_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('korean'); // Korean flashcards: original site only (api/_cfg.js), on every device
   const isKo = t => !!t && t.type === 'kocard';
+  // ...and only while you're signed in (sync on), so someone opening the address without your account doesn't see it.
+  // Supabase keeps the sign-in in localStorage (sb-…-auth-token), so this is known right at start-up, before sync connects.
+  function koSignedIn() { if (sync.user) return true; try { for (let i = 0; i < localStorage.length; i++) if (/^sb-.+-auth-token$/.test(localStorage.key(i) || '')) return true; } catch (e) { } return false; }
+  const koOn = () => KO_ON && koSignedIn();
   const isMsg = t => !!t && t.type === 'msg'; // a text or WhatsApp message waiting in My Day (Settings → Texts & WhatsApp)
   const COLORS = ['#2856c7', '#2a9d8f', '#d99100', '#c4372c', '#7b4fc9', '#3d8b37', '#d0559a', '#607089'];
 
@@ -877,7 +881,7 @@
   function renderSide() {
     let h = '<nav class="nav">';
     const overdue = open().filter(t => t.due && t.due < todayISO()).length;
-    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [], KO_ON ? ['korean'] : [])) {
+    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [], koOn() ? ['korean'] : [])) {
       const c = viewCount(v);
       h += '<button type="button" class="nav-item" data-view="' + v + '" aria-current="' + (!ui.search && (ui.view === v || (v === 'notes' && paperView(ui.view)) || (v === 'journal' && ui.view === 'jlink'))) + '"><span class="' + VIEWS[v].cls + '">' + VIEWS[v].icon + '</span><span class="label">' + VIEWS[v].title + '</span>' +
         (c !== '' && c ? '<span class="count' + ((v === 'myday' || v === 'all') && overdue ? ' hot' : '') + '">' + c + '</span>' : '') + '</button>';
@@ -1084,7 +1088,7 @@
       if (!PAY_ON) { ui.view = 'myday'; return renderMain(); }
       ({ title, sub, html, actions } = renderPayments());
     } else if (v === 'korean') {
-      if (!KO_ON) { ui.view = 'myday'; return renderMain(); }
+      if (!koOn()) { ui.view = 'myday'; return renderMain(); }
       ({ title, sub, html, actions } = renderKorean());
     } else if (v === 'jlink') {
       ({ title, sub, html, actions } = renderLinkPage(ui.jlink || ''));
@@ -1762,12 +1766,12 @@
     const v = $('#qa').value.trim(), el = $('#qaPreview');
     el.classList.toggle('idle', !v && !ui.qaEvent);
     if (!v && ui.qaEvent) { el.innerHTML = 'Adding an <b>event</b>' + (ui.qaDate ? ' on ' + esc(D.dueLabel(ui.qaDate)) : '') + '. It shows on your calendar without a checkbox. <button type="button" class="example" id="qaTaskMode">Add a task instead</button>'; return; }
-    if (!v && KO_ON && ui.view === 'korean' && !ui.search) { el.innerHTML = 'Try <button type="button" class="example" data-ex="막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix">막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix</button>'; return; }
+    if (!v && koOn() && ui.view === 'korean' && !ui.search) { el.innerHTML = 'Try <button type="button" class="example" data-ex="막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix">막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix</button>'; return; }
     if (!v) {
       el.innerHTML = 'Try <button type="button" class="example" data-ex="Pay rent every month on the 1st 9am">Pay rent every month on the 1st 9am</button> or <button type="button" class="example" data-ex="Call mom tomorrow 6pm">Call mom tomorrow 6pm</button>';
       return;
     }
-    if (KO_ON && !ui.qaEvent && (/^ko\s*:/i.test(v) || (ui.view === 'korean' && !ui.search))) { el.innerHTML = koPreview(v); return; }
+    if (koOn() && !ui.qaEvent && (/^ko\s*:/i.test(v) || (ui.view === 'korean' && !ui.search))) { el.innerHTML = koPreview(v); return; }
     const p = quickParse(v);
     const icon = { date: I.cal, recur: I.repeat, list: I.folder, warn: I.x, rem: I.bell, tag: I.tag, start: I.up, event: I.star };
     const defaultList = currentDefaultList();
@@ -1782,7 +1786,7 @@
   function addFromQuick() {
     const inp = $('#qa'), v0 = inp.value.trim();
     if (!v0) return;
-    if (KO_ON && !ui.qaEvent && (/^ko\s*:/i.test(v0) || (ui.view === 'korean' && !ui.search)) && koQuick(v0)) return;
+    if (koOn() && !ui.qaEvent && (/^ko\s*:/i.test(v0) || (ui.view === 'korean' && !ui.search)) && koQuick(v0)) return;
     const wt = parseWaiting(v0), v = wt ? wt.rest : v0;
     const p = quickParse(v);
     const listId = p.isEvent ? 'inbox' : (p.listId || currentDefaultList().id);
@@ -2882,7 +2886,7 @@
     const left = Math.max(0, cfg.newPerDay - ((cfg.log[T] || {}).n || 0));
     return { due, fresh: fresh.slice(0, left), freshAll: fresh.length };
   }
-  const koCount = () => { if (!KO_ON) return 0; const t = koToday(); return t.due.length + t.fresh.length; };
+  const koCount = () => { if (!koOn()) return 0; const t = koToday(); return t.due.length + t.fresh.length; };
   function koStart() {
     const t = koToday();
     const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -2962,6 +2966,7 @@
     const line = qs.get('ko'); if (line === null) return;
     history.replaceState(null, '', location.pathname);
     if (!KO_ON) return;
+    if (!koOn()) { toast('Sign in first (Turn on sync, bottom left), then click + Tally again.'); return; }
     // the line without the dashes Netflix puts before each speaker
     ui.ko.pre = { ex: line.replace(/\s+/g, ' ').replace(/(^|\s)[-–]\s+/g, '$1').trim().slice(0, 300), src: (qs.get('src') || '').trim().slice(0, 120), w: (qs.get('w') || '').trim().slice(0, 80), from: (qs.get('from') || 'the bookmark').slice(0, 40) };
     ui.ko.q = null; ui.ko.tab = 'home'; setView('korean');
@@ -3133,7 +3138,7 @@
     toast(added + ' card' + (added === 1 ? '' : 's') + ' added' + (label ? ' from ' + label : '') + (dup ? ' · ' + dup + ' you already had' : ''), true);
   }
   function koMyDay() {
-    if (!KO_ON) return '';
+    if (!koOn()) return '';
     const n = koCount(); if (!n) return '';
     return '<div class="ko-nudge"><span class="ko-badge" lang="ko">한</span><div><b>Korean</b><span>' + n + ' card' + (n === 1 ? '' : 's') + ' to review · about ' + Math.max(1, Math.round(n * 8 / 60)) + ' min</span></div><span class="spacer"></span><button type="button" class="chipbtn solid" data-kogo="1">Review</button></div>';
   }
