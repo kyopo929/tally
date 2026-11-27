@@ -2849,17 +2849,19 @@
 
 
   /* ---------- Korean flashcards (original site only, like Payments; api/_cfg.js features 'korean') ----------
-     Each card is an item with type:'kocard': title = the Korean, ko = { back, ex, src, note, hits, rev, s, s2 }.
-     s is the schedule Korean → meaning, s2 meaning → Korean (only when rev is on). See src/korean.js.
-     One item type:'kocfg' holds the settings and the daily review log, so streaks follow you between devices. */
-  const K = window.TallyKo;
+     Each card is an item with type:'kocard': title = the Korean, ko = { back, ex, src, note, hits, rev, known, s, s2 }.
+     s is the schedule Korean → meaning, s2 meaning → Korean (only when rev is on); known cards are never reviewed. See src/korean.js.
+     Word packs are in src/korean-packs.js. One item type:'kocfg' holds the settings and the daily review log, so streaks follow you between devices.
+     The voice is picked per device (voices differ by device), saved in localStorage 'tally-ko-voice'. */
+  const K = window.TallyKo, KO_PACKS = window.TallyKoPacks || [];
+  const KO_VOICE_KEY = 'tally-ko-voice', KO_MALE = /injoon|hyunsu|bongjin|gookmin|jihun|male|남성|남자/i;
   const koCards = () => S.tasks.filter(isKo);
   const koByFront = front => koCards().find(c => K.sameFront(c.title, front));
+  const koKey = s => String(s || '').replace(/[\s.,!?~…"'“”‘’()]/g, '').toLowerCase();
   function koCfg(create) {
     let c = S.tasks.filter(t => t.type === 'kocfg').sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!c && create) c = newTask({ type: 'kocfg', title: 'Korean settings', cfg: {} });
-    const d = { newPerDay: 10, listen: false, autoplay: true, slow: false, log: {} };
-    return c ? Object.assign(d, c.cfg, { item: c }) : d;
+    return Object.assign({ newPerDay: 10, log: {} }, c ? c.cfg : {}, { item: c || null });
   }
   function koSetCfg(patch) { const c = koCfg(true).item; c.cfg = Object.assign({}, c.cfg, patch); }
   function koLogAdd(isNew) {
@@ -2870,7 +2872,7 @@
   }
   // What's waiting today: reviews that are due, plus new cards up to the daily limit
   function koToday() {
-    const T = todayISO(), cfg = koCfg(), cs = koCards().sort((a, b) => a.createdAt - b.createdAt);
+    const T = todayISO(), cfg = koCfg(), cs = koCards().filter(c => !(c.ko || {}).known).sort((a, b) => a.createdAt - b.createdAt);
     const due = [], fresh = [];
     for (const c of cs) {
       const k = c.ko || {};
@@ -2884,11 +2886,11 @@
   function koStart() {
     const t = koToday();
     const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-    ui.ko.q = shuffle(t.due).concat(t.fresh); ui.ko.done = 0; ui.ko.total = ui.ko.q.length; ui.ko.shown = false; ui.ko.textOn = false;
+    ui.ko.q = shuffle(t.due).concat(t.fresh); ui.ko.done = 0; ui.ko.total = ui.ko.q.length; ui.ko.shown = false;
     ui.ko.tab = 'home';
-    renderMain(); koAuto();
+    renderMain();
   }
-  function koStop() { ui.ko.q = null; if ('speechSynthesis' in window) speechSynthesis.cancel(); renderMain(); }
+  function koStop() { ui.ko.q = null; try { speechSynthesis.cancel(); } catch (e) { } renderSide(); renderMain(); }
   const koCur = () => { while (ui.ko.q && ui.ko.q.length && !taskById(ui.ko.q[0].id)) ui.ko.q.shift(); return ui.ko.q && ui.ko.q[0]; };
   function koGrade(g) {
     const cur = koCur(); if (!cur || !ui.ko.shown) return;
@@ -2898,56 +2900,88 @@
     koLogAdd(isNew);
     ui.ko.q.shift();
     if (g === 1) ui.ko.q.push(cur); else ui.ko.done++;
-    ui.ko.shown = false; ui.ko.textOn = false;
-    save(); renderSide(); renderMain(); koAuto();
+    ui.ko.shown = false;
+    save(); renderSide(); renderMain();
   }
-  /* ---- audio: the device's own Korean voice ---- */
-  const koVoice = () => { try { return speechSynthesis.getVoices().find(v => /^ko/i.test(v.lang)) || null; } catch (e) { return null; } };
+  function koKnow() { // a new card you already know: never shown again (undo in the toast, or untick it in the card)
+    const cur = koCur(); if (!cur) return;
+    const c = taskById(cur.id); snapshot();
+    c.ko = Object.assign({}, c.ko, { known: true });
+    ui.ko.q = ui.ko.q.filter(x => x.id !== c.id); ui.ko.shown = false;
+    save(); renderSide(); renderMain(); toast('Marked as known: ' + c.title + '. It won’t come up again', true);
+  }
+  /* ---- audio: the device's own Korean voices; a male voice when the device has one ---- */
+  const koVoices = () => { try { return speechSynthesis.getVoices().filter(v => /^ko/i.test(v.lang)); } catch (e) { return []; } };
+  function koVoice() {
+    const vs = koVoices(); if (!vs.length) return null;
+    let pick = ''; try { pick = localStorage.getItem(KO_VOICE_KEY) || ''; } catch (e) { }
+    return vs.find(v => v.name === pick) || vs.find(v => KO_MALE.test(v.name)) || vs[0];
+  }
   function koSpeak(text) {
     if (!text || !('speechSynthesis' in window)) return;
     try {
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR';
       const v = koVoice(); if (v) u.voice = v;
-      u.rate = koCfg().slow ? 0.7 : 1;
       speechSynthesis.speak(u);
     } catch (e) { }
   }
-  function koAuto() { // play the Korean on its own when a card comes up (Korean → meaning cards only)
-    const cur = koCur(), cfg = koCfg(); if (!cur || cur.dir !== 1 || !(cfg.autoplay || cfg.listen)) return;
-    const c = taskById(cur.id); setTimeout(() => koSpeak(cfg.listen && c.ko && c.ko.ex ? c.ko.ex : c.title), 150);
+  const koVoiceLabel = v => v.name.replace(/^(Microsoft|Google)\s+/, '').replace(/\s*-\s*Korean.*$/i, '').replace(/\s*\(Natural\)/, ' (natural)') + (KO_MALE.test(v.name) ? ' · male' : '');
+  function koVoiceHtml() {
+    const vs = koVoices(), cur = koVoice();
+    if (!vs.length) return '<p class="hint ko-novoice">This device has no Korean voice, so cards are silent. On a Windows computer, Edge has a male Korean voice built in (InJoon). In Chrome: Windows Settings → Time &amp; language → Speech → Add voices → Korean. On Android: Settings → Text-to-speech → Google → Korean.</p>';
+    return '<label class="ko-chk">Voice <select class="ctl" id="koVoice">' + vs.map(v => '<option value="' + esc(v.name) + '"' + (cur && v.name === cur.name ? ' selected' : '') + '>' + esc(koVoiceLabel(v)) + '</option>').join('') + '</select><button type="button" class="linkbtn" data-kosay="안녕하세요, 반가워요.">Test</button></label>' +
+      (vs.some(v => KO_MALE.test(v.name)) ? '' : '<span class="hint">No male Korean voice on this device. Open Tally in Microsoft Edge for one (InJoon). On Android, pick a voice in Settings → Text-to-speech → Google → Korean.</span>');
   }
-  // The card's word, underlined in its example sentence (also when the word is a verb like 서운하다 → 서운해서)
+  // The card's word, highlighted in its example sentence (also when the word is a verb like 서운하다 → 서운해서)
   function koMark(ex, front) {
     const e = String(ex || ''); if (!e) return '';
     const tries = [front, front.replace(/하다$|다$/, ''), front.split(' ')[0].replace(/다$/, '')].filter(x => x && x.length >= 1);
     for (const w of tries) { const i = e.indexOf(w); if (i >= 0) return esc(e.slice(0, i)) + '<mark>' + esc(e.slice(i, i + w.length)) + '</mark>' + esc(e.slice(i + w.length)); }
     return esc(e);
   }
+  function koPackHtml(have) {
+    return '<div class="ko-packs">' + KO_PACKS.map(p => {
+      const left = p.cards.filter(c => !have.has(koKey(c.front))).length;
+      return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + p.cards.length + ' words</span></div>' +
+        (left ? '<button type="button" class="chipbtn' + (have.size ? '' : ' solid') + '" data-kopack="' + p.id + '">Add ' + left + '</button>' : '<span class="ko-added">' + I.check + 'Added</span>') + '</div>';
+    }).join('') + '</div>';
+  }
+  // Four boxes to add a card: Korean, English, the full line, the show. The show is kept for the next card.
+  function koAddHtml() {
+    const f = (id, ph, cls, lang, val) => '<input class="ctl ' + cls + '" id="' + id + '" placeholder="' + ph + '" autocomplete="off"' + (lang ? ' lang="ko"' : '') + ' value="' + esc(val || '') + '" aria-label="' + ph + '">';
+    return '<div class="ko-addrow">' + f('kaFront', 'Korean', 'ka-front', true) + f('kaBack', 'English', 'ka-back') + f('kaEx', 'The full line (optional)', 'ka-ex', true) + f('kaSrc', 'Show (optional)', 'ka-src', false, ui.ko.lastSrc) +
+      '<button type="button" class="chipbtn solid" data-kaadd="1">' + I.plus + 'Add</button></div>';
+  }
+  function koAddFromRow() {
+    const v = id => ($('#' + id) ? $('#' + id).value.trim() : '');
+    const front = v('kaFront'); if (!front) { $('#kaFront').focus(); return; }
+    const p = { front, back: v('kaBack'), ex: v('kaEx'), src: v('kaSrc') };
+    ui.ko.lastSrc = p.src;
+    snapshot(); const r = koAdd(p); save(); render();
+    toast(r.dup ? 'Already a card: ' + r.card.title + ' · heard ' + r.card.ko.hits + '×' : 'Card added: ' + r.card.title, true);
+    const f = $('#kaFront'); if (f) f.focus();
+  }
   function renderKorean() {
     ui.ko = ui.ko || { tab: 'home', q: null };
     const cfg = koCfg(), cs = koCards(), T = todayISO();
     const tabs = '<div class="seg ko-tabs" role="group" aria-label="Korean"><button type="button" data-kotab="home" aria-pressed="' + (ui.ko.tab !== 'cards') + '">Review</button><button type="button" data-kotab="cards" aria-pressed="' + (ui.ko.tab === 'cards') + '">Cards <span class="n">' + cs.length + '</span></button></div>';
-    const actions = '<button type="button" class="chipbtn" data-koadd="1">' + I.plus + 'Card</button>';
+    const actions = '';
     if (ui.ko.q) return { title: 'Korean', sub: 'Review', html: koReviewHtml(), actions: '' };
-    if (ui.ko.tab === 'cards') return { title: 'Korean', sub: cs.length + ' card' + (cs.length === 1 ? '' : 's'), html: tabs + koListHtml(cs), actions };
+    if (ui.ko.tab === 'cards') return { title: 'Korean', sub: cs.length + ' card' + (cs.length === 1 ? '' : 's'), html: tabs + koAddHtml() + koListHtml(cs), actions };
     const td = koToday(), n = td.due.length + td.fresh.length, st = K.streak(cfg.log, T), heard = cs.reduce((a, c) => a + ((c.ko || {}).hits || 0), 0);
-    const doneToday = (cfg.log[T] || {}).r || 0;
-    let h = tabs + '<div class="ko-home">';
-    h += '<div class="ko-stats"><div class="pcard"><small>To review</small><b>' + td.due.length + '</b><em>' + td.fresh.length + ' new</em></div><div class="pcard"><small>Streak</small><b>' + st + '</b><em>day' + (st === 1 ? '' : 's') + (doneToday ? ' · ' + doneToday + ' today' : '') + '</em></div><div class="pcard"><small>Cards</small><b>' + cs.length + '</b><em>' + heard + ' tally mark' + (heard === 1 ? '' : 's') + '</em></div></div>';
-    if (!cs.length) h += '<div class="ko-go"><p><b>No cards yet.</b> Add words you didn’t catch while watching, or start with the starter set: ' + K.STARTER.length + ' words heritage speakers often half-know, plus news and formal words.</p><div class="ko-row"><button type="button" class="chipbtn solid" data-kostarter="1">Add the starter set</button><button type="button" class="chipbtn" data-koadd="1">' + I.plus + 'Add a card</button><button type="button" class="chipbtn" data-kobulk="1">Paste a list…</button></div></div>';
-    else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min · Space shows the answer, 1–4 to rate</span></div>';
-    else h += '<div class="ko-go"><p><b>All caught up for today.</b> ' + (td.freshAll ? td.freshAll + ' new card' + (td.freshAll === 1 ? '' : 's') + ' waiting for tomorrow (' + cfg.newPerDay + ' a day). ' : '') + 'Add the words you didn’t catch tonight and they’ll show up tomorrow.</p>' + (td.freshAll ? '<button type="button" class="chipbtn" data-komore="1">Learn 5 more now</button>' : '') + '</div>';
-    if (cs.length) {
-      h += '<div class="ko-opts"><label class="ko-chk"><input type="checkbox" data-kocfg="listen"' + (cfg.listen ? ' checked' : '') + '> Listening mode <span class="hint">hear the sentence first, then show the text</span></label>' +
-        '<label class="ko-chk"><input type="checkbox" data-kocfg="autoplay"' + (cfg.autoplay ? ' checked' : '') + '> Play the Korean on each card</label>' +
-        '<label class="ko-chk"><input type="checkbox" data-kocfg="slow"' + (cfg.slow ? ' checked' : '') + '> Slower voice</label>' +
-        '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>';
-      if (!koVoice()) h += '<p class="hint ko-novoice">No Korean voice on this device yet, so cards are silent. On Windows: Settings → Time &amp; language → Speech → Add voices → Korean. Edge usually has one built in.</p>';
-    }
-    h += '<div class="ko-tip"><p><b>Caught something while watching?</b> Type it in the box above: here as is, or from any other page with <code>ko:</code> in front.</p><p><code lang="ko">ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game</code></p><p>The Korean, then <code>=</code> the meaning, <code>|</code> the line you heard, <code>#</code> where you heard it. Only the Korean is needed. Type a word you already have and it gets a tally mark instead.</p>' +
-      (cs.length ? '<div class="ko-row"><button type="button" class="chipbtn" data-kobulk="1">Paste a list…</button>' + (cs.some(c => (c.ko || {}).src === 'Starter set') ? '' : '<button type="button" class="chipbtn" data-kostarter="1">Add the starter set</button>') + '</div>' : '') + '</div>';
-    const recent = cs.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+    const known = cs.filter(c => (c.ko || {}).known).length, doneToday = (cfg.log[T] || {}).r || 0, have = new Set(cs.map(c => koKey(c.title)));
+    let h = tabs + koAddHtml() + '<div class="ko-home">';
+    h += '<div class="ko-stats"><div class="pcard"><small>To review</small><b>' + td.due.length + '</b><em>' + td.fresh.length + ' new</em></div><div class="pcard"><small>Streak</small><b>' + st + '</b><em>day' + (st === 1 ? '' : 's') + (doneToday ? ' · ' + doneToday + ' today' : '') + '</em></div><div class="pcard"><small>Cards</small><b>' + cs.length + '</b><em>' + (known ? known + ' known · ' : '') + heard + ' tally mark' + (heard === 1 ? '' : 's') + '</em></div></div>';
+    if (!cs.length) h += '<div class="ko-go"><p><b>No cards yet.</b> Start with a word pack below, paste a YouTube transcript, or add a word you didn’t catch in the boxes above.</p></div>';
+    else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min · Space shows the answer, 1–4 rate it, K if you already know a new word</span></div>';
+    else h += '<div class="ko-go"><p><b>All caught up for today.</b> ' + (td.freshAll ? td.freshAll + ' new card' + (td.freshAll === 1 ? '' : 's') + ' waiting, ' + cfg.newPerDay + ' a day. ' : '') + 'Add the words you didn’t catch tonight and they’ll show up tomorrow.</p>' + (td.freshAll ? '<button type="button" class="chipbtn" data-komore="1">Learn 10 more now</button>' : '') + '</div>';
+    h += '<div class="ko-opts">' + koVoiceHtml() + '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30, 50].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>';
+    h += '<div class="section-head">Word packs</div>' + koPackHtml(have);
+    h += '<div class="section-head">Your own words</div><div class="ko-tip"><p><b>From YouTube, for free:</b> under a video click <b>…more</b> → <b>Show transcript</b>, select it all and copy, then <button type="button" class="linkbtn" data-kotr="1">paste the transcript</button>. Tap the lines you didn’t understand and they become cards. Subtitle files (.srt, .vtt) work too.</p>' +
+      '<p><b>While watching anything:</b> fill in the boxes at the top. Only the Korean is needed, and Enter adds it. A word you already have gets a tally mark instead. From another page of Tally you can also type <code lang="ko">ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game</code> in the main add box.</p>' +
+      '<div class="ko-row"><button type="button" class="chipbtn" data-kotr="1">Paste a transcript…</button><button type="button" class="chipbtn" data-kobulk="1">Paste a word list…</button></div></div>';
+    const recent = cs.filter(c => (c.ko || {}).src && !KO_PACKS.some(p => p.name === c.ko.src)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
     if (recent.length) h += '<div class="section-head">Recently added</div>' + koListHtml(recent, true);
     h += '</div>';
     return { title: 'Korean', sub: n ? n + ' to review' : 'All caught up', html: h, actions };
@@ -2958,23 +2992,22 @@
       const st = K.streak(cfg.log, todayISO());
       return '<div class="ko-done"><strong>Done for today</strong><p>' + ui.ko.done + ' card' + (ui.ko.done === 1 ? '' : 's') + ' reviewed' + (st ? ' · ' + st + '-day streak' : '') + '.</p><button type="button" class="chipbtn solid" data-kostop="1">Back to Korean</button></div>';
     }
-    const c = taskById(cur.id), k = c.ko || {}, rev = cur.dir === 2, sched = rev ? k.s2 : k.s, shown = ui.ko.shown;
-    const hideText = cfg.listen && !rev && !shown && !ui.ko.textOn;
-    const left = ui.ko.q.length, pct = ui.ko.total ? Math.round(100 * ui.ko.done / (ui.ko.done + left)) : 0;
-    let h = '<div class="ko-review"><div class="ko-bar"><span>' + left + ' left' + (K.isNewCard(sched) ? ' · <b>new</b>' : '') + ' · ' + (rev ? 'English → Korean' : 'Korean → English') + '</span><span class="spacer"></span><button type="button" class="linkbtn" data-kostop="1">Stop</button></div><div class="ko-prog"><i style="width:' + pct + '%"></i></div>';
+    const c = taskById(cur.id), k = c.ko || {}, rev = cur.dir === 2, sched = rev ? k.s2 : k.s, shown = ui.ko.shown, isNew = K.isNewCard(sched);
+    const left = ui.ko.q.length, pct = Math.round(100 * ui.ko.done / Math.max(1, ui.ko.done + left));
+    const say = (t, lbl) => '<button type="button" class="ko-play" data-kosay="' + esc(t) + '" aria-label="' + lbl + '" title="' + lbl + '">' + I.ko + '</button>';
+    let h = '<div class="ko-review"><div class="ko-bar"><span>' + left + ' left' + (isNew ? ' · <b>new</b>' : '') + ' · ' + (rev ? 'English → Korean' : 'Korean → English') + '</span><span class="spacer"></span><button type="button" class="linkbtn" data-kostop="1">Stop</button></div><div class="ko-prog"><i style="width:' + pct + '%"></i></div>';
     h += '<div class="ko-card' + (shown ? ' shown' : '') + '">';
     if (rev) h += '<div class="ko-front en">' + esc(k.back || '(no meaning yet)') + '</div>';
-    else if (hideText) h += '<div class="ko-listen"><button type="button" class="ko-play big" data-kosay="' + esc(k.ex || c.title) + '" aria-label="Play again">' + I.ko + '</button><button type="button" class="linkbtn" data-kotext="1">Show the text</button></div>';
-    else h += '<div class="ko-front" lang="ko">' + esc(c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(c.title) + '" aria-label="Say it" title="Say it">' + I.ko + '</button></div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(k.ex) + '" aria-label="Say the sentence" title="Say the sentence">' + I.ko + '</button></div>' : '');
+    else h += '<div class="ko-front" lang="ko">' + esc(c.title) + say(c.title, 'Say it') + '</div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + say(k.ex, 'Say the sentence') + '</div>' : '');
     if (shown) {
       h += '<div class="ko-ans">';
-      if (rev) h += '<div class="ko-front" lang="ko">' + esc(c.title) + '<button type="button" class="ko-play" data-kosay="' + esc(c.title) + '" aria-label="Say it">' + I.ko + '</button></div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + '</div>' : '');
+      if (rev) h += '<div class="ko-front" lang="ko">' + esc(c.title) + say(c.title, 'Say it') + '</div>' + (k.ex ? '<div class="ko-ex" lang="ko">' + koMark(k.ex, c.title) + '</div>' : '');
       else h += '<div class="ko-mean">' + (k.back ? esc(k.back) : '<span class="hint">No meaning yet. Click Edit to add one.</span>') + '</div>';
       if (k.note) h += '<div class="ko-note">' + esc(k.note) + '</div>';
       h += '</div>';
     }
     h += '<div class="ko-meta">' + (k.src ? '<span>' + I.tag + esc(k.src) + '</span>' : '') + (k.hits ? '<span>Heard ' + k.hits + '×</span>' : '') + '<span class="spacer"></span><button type="button" class="linkbtn" data-kohit="' + c.id + '" title="You heard it again somewhere">+ Heard it</button><button type="button" class="linkbtn" data-koedit="' + c.id + '">Edit</button></div></div>';
-    if (!shown) h += '<div class="ko-acts"><button type="button" class="chipbtn solid big" data-koshow="1">Show answer <kbd>Space</kbd></button></div>';
+    if (!shown) h += '<div class="ko-acts">' + (isNew && !rev ? '<button type="button" class="chipbtn big" data-koknow="1">I know this <kbd>K</kbd></button>' : '') + '<button type="button" class="chipbtn solid big" data-koshow="1">Show answer <kbd>Space</kbd></button></div>';
     else {
       const t = todayISO(), lbl = g => K.ivlLabel(K.grade(sched, g, t).ivl);
       h += '<div class="ko-acts grades">' + [[1, 'Again'], [2, 'Hard'], [3, 'Good'], [4, 'Easy']].map(([g, n]) => '<button type="button" class="ko-g g' + g + '" data-kog="' + g + '"><b>' + n + '</b><small>' + lbl(g) + '</small><kbd>' + g + '</kbd></button>').join('') + '</div>';
@@ -2989,25 +3022,26 @@
       if (q) xs = cs.filter(c => (c.title + ' ' + ((c.ko || {}).back || '') + ' ' + ((c.ko || {}).ex || '') + ' ' + ((c.ko || {}).src || '')).toLowerCase().includes(q));
       xs = xs.slice().sort((a, b) => b.createdAt - a.createdAt);
     }
-    const next = s => !s || !s.due ? 'New' : s.due <= T ? 'Due now' : K.diffDays(s.due, T) === 1 ? 'Tomorrow' : 'In ' + K.ivlLabel(K.diffDays(s.due, T));
-    let h = compact ? '' : '<input class="ctl ko-find" id="koFind" placeholder="Filter cards: Korean, meaning, sentence or show" value="' + esc(ui.ko.find || '') + '" aria-label="Filter cards">';
-    if (!xs.length) return h + (compact ? '' : empty(cs.length ? 'No matches' : 'No cards yet', cs.length ? 'Try a different word.' : 'Type a word in the box above to add your first card.'));
-    h += '<div class="tasks ko-list">' + xs.map(c => {
+    const next = k => k.known ? 'Known' : !k.s || !k.s.due ? 'New' : k.s.due <= T ? 'Due now' : K.diffDays(k.s.due, T) === 1 ? 'Tomorrow' : 'In ' + K.ivlLabel(K.diffDays(k.s.due, T));
+    let h = compact ? '' : '<input class="ctl ko-find" id="koFind" placeholder="Filter cards: Korean, meaning, sentence or pack" value="' + esc(ui.ko.find || '') + '" aria-label="Filter cards">';
+    if (!xs.length) return h + (compact ? '' : empty(cs.length ? 'No matches' : 'No cards yet', cs.length ? 'Try a different word.' : 'Add a word pack on the Review tab, or type a word in the box above.'));
+    const more = !compact && xs.length > ui.doneLimit ? xs.length - ui.doneLimit : 0;
+    h += '<div class="tasks ko-list">' + xs.slice(0, compact ? xs.length : ui.doneLimit).map(c => {
       const k = c.ko || {};
-      return '<div class="task ko-item"><div class="tbody" data-koedit="' + c.id + '" role="button" tabindex="0"><div class="ttitle"><span lang="ko">' + esc(c.title) + '</span>' + (k.back ? ' <span class="ko-dim">· ' + esc(k.back) + '</span>' : '') + '</div><div class="tmeta">' + (k.ex ? '<span lang="ko">' + esc(trunc(k.ex, 60)) + '</span>' : '') + (k.src ? '<span>' + I.tag + esc(k.src) + '</span>' : '') + '<span>' + next(k.s) + '</span>' + (k.rev ? '<span>Both ways</span>' : '') + (k.hits ? '<span>Heard ' + k.hits + '×</span>' : '') + '</div></div>' +
+      return '<div class="task ko-item' + (k.known ? ' known' : '') + '"><div class="tbody" data-koedit="' + c.id + '" role="button" tabindex="0"><div class="ttitle"><span lang="ko">' + esc(c.title) + '</span>' + (k.back ? ' <span class="ko-dim">· ' + esc(k.back) + '</span>' : '') + '</div><div class="tmeta">' + (k.ex ? '<span lang="ko">' + esc(trunc(k.ex, 60)) + '</span>' : '') + (k.src ? '<span>' + I.tag + esc(k.src) + '</span>' : '') + '<span>' + next(k) + '</span>' + (k.rev ? '<span>Both ways</span>' : '') + (k.hits ? '<span>Heard ' + k.hits + '×</span>' : '') + '</div></div>' +
         '<button type="button" class="iconbtn" data-kosay="' + esc(c.title) + '" aria-label="Say it" title="Say it">' + I.ko + '</button><button type="button" class="chipbtn" data-kohit="' + c.id + '" title="You heard it again somewhere">+1</button></div>';
-    }).join('') + '</div>';
+    }).join('') + '</div>' + (more ? '<p class="hint">' + more + ' more. Type in the filter to find one.</p>' : '');
     return h;
   }
   /* ---- adding and editing ---- */
-  function koAdd(p, quiet) {
+  function koAdd(p) {
     const have = koByFront(p.front);
     if (have) {
       const k = Object.assign({}, have.ko); k.hits = (k.hits || 0) + 1;
       if (!k.back && p.back) k.back = p.back; if (!k.ex && p.ex) k.ex = p.ex; if (!k.src && p.src) k.src = p.src;
       have.ko = k; return { card: have, dup: true };
     }
-    const card = newTask({ type: 'kocard', title: p.front, ko: { back: p.back || '', ex: p.ex || '', src: p.src || '', note: p.note || '', hits: 0, rev: !!p.rev, s: null, s2: null } });
+    const card = newTask({ type: 'kocard', title: p.front, ko: { back: p.back || '', ex: p.ex || '', src: p.src || '', note: p.note || '', hits: 0, rev: !!p.rev, known: !!p.known, s: null, s2: null } });
     return { card, dup: false };
   }
   function koQuick(v) {
@@ -3029,30 +3063,48 @@
       f('Korean', 'front', c && c.title, 'e.g. 어차피', true) + f('Meaning', 'back', k.back, 'e.g. anyway, in any case') + f('The line you heard (optional)', 'ex', k.ex, 'e.g. 어차피 늦었으니까 천천히 가자', true) + f('Where (optional)', 'src', k.src, 'e.g. Squid Game ep 2, a YouTube vlog') +
       '<label class="field"><span class="field-label">Note (optional)</span><textarea class="ctl" id="ko_note" rows="2" placeholder="How it’s used, a nuance, a related word">' + esc(k.note || '') + '</textarea></label>' +
       '<label class="ko-chk"><input type="checkbox" id="ko_rev"' + (k.rev ? ' checked' : '') + '> Also practice English → Korean <span class="hint">for words you want to start using</span></label>' +
+      '<label class="ko-chk"><input type="checkbox" id="ko_known"' + (k.known ? ' checked' : '') + '> I know this <span class="hint">never comes up in reviews</span></label>' +
       (c ? '<p class="hint">' + (k.s && k.s.due ? 'Next review: ' + esc(D.dueLabel(k.s.due)) + ' · reviewed ' + (k.s.reps || 0) + '× · forgot ' + (k.s.lapses || 0) + '×' : 'Not reviewed yet') + '</p>' : '') +
       '<div class="ko-row">' + (c ? '<button type="button" class="danger-btn" data-kodel="' + c.id + '">Delete card</button>' + (k.s && k.s.due ? '<button type="button" class="chipbtn" data-koreset="' + c.id + '" title="Start this card over as new">Start over</button>' : '') : '') + '<span class="spacer"></span><button type="button" class="chipbtn" data-close="1">Cancel</button><button type="button" class="chipbtn solid" data-kosave="' + (c ? c.id : '') + '">Save</button></div></div></div>';
     $('#sheet').hidden = false; $('#ko_' + (c ? 'back' : 'front')).focus();
   }
   function koSave(id) {
     const front = $('#ko_front').value.trim(); if (!front) { $('#ko_front').focus(); return; }
-    const vals = { back: $('#ko_back').value.trim(), ex: $('#ko_ex').value.trim(), src: $('#ko_src').value.trim(), note: $('#ko_note').value.trim(), rev: $('#ko_rev').checked };
+    const vals = { back: $('#ko_back').value.trim(), ex: $('#ko_ex').value.trim(), src: $('#ko_src').value.trim(), note: $('#ko_note').value.trim(), rev: $('#ko_rev').checked, known: $('#ko_known').checked };
     snapshot();
-    if (id) { const c = taskById(id); if (!c) return; c.title = front; c.ko = Object.assign({}, c.ko, vals); toast('Card saved', true); }
+    if (id) { const c = taskById(id); if (!c) return; c.title = front; c.ko = Object.assign({}, c.ko, vals); if (vals.known && ui.ko.q) ui.ko.q = ui.ko.q.filter(x => x.id !== id); toast('Card saved', true); }
     else { const dup = koByFront(front); if (dup) { toast('You already have ' + dup.title + '. Opened it instead.'); koForm(dup.id); return; } koAdd(Object.assign({ front }, vals)); toast('Card added: ' + front, true); }
     save(); closeSheet(); render();
   }
   function koBulkForm() {
-    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="kbTitle"><div class="sheet-head"><h2 id="kbTitle">Paste a list of words</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body ko-form">' +
-      '<p>One word or phrase per line. Each line works like the add box: <code lang="ko">하필 = of all days | 왜 하필 오늘이야 #Netflix</code>. Columns copied from a spreadsheet or exported from Language Reactor or Anki also work (Korean, meaning, sentence, separated by tabs).</p>' +
+    $('#sheet').innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="kbTitle"><div class="sheet-head"><h2 id="kbTitle">Paste a word list</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body ko-form">' +
+      '<p>One word or phrase per line. Each line works like the add box: <code lang="ko">하필 = of all days | 왜 하필 오늘이야 #Netflix</code>. Columns copied from a spreadsheet or exported from Anki also work (Korean, meaning, sentence, separated by tabs).</p>' +
       '<textarea class="ctl" id="koBulk" rows="10" lang="ko" placeholder="어쩐지 = no wonder&#10;괜히 = for no reason&#10;막상"></textarea><p class="hint" id="koBulkMsg"></p>' +
       '<div class="ko-row"><span class="spacer"></span><button type="button" class="chipbtn" data-close="1">Cancel</button><button type="button" class="chipbtn solid" data-kobulkgo="1">Add cards</button></div></div></div>';
     $('#sheet').hidden = false; $('#koBulk').focus();
+  }
+  /* ---- a YouTube transcript or subtitle file: tap the lines you didn't catch ---- */
+  function koTrForm() {
+    const tr = ui.ko.tr = ui.ko.tr || { src: '', text: '', lines: null, sel: new Set() };
+    const head = '<div class="sheet narrow ko-trsheet" role="dialog" aria-modal="true" aria-labelledby="ktTitle"><div class="sheet-head"><h2 id="ktTitle">' + (tr.lines ? 'Tap the lines you didn’t catch' : 'Paste a transcript') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body ko-form">';
+    if (!tr.lines) {
+      $('#sheet').innerHTML = head + '<p><b>YouTube:</b> under the video click <b>…more</b>, then <b>Show transcript</b>. Pick Korean if there’s a choice, select all of it and copy. Auto-generated captions work too. <b>Subtitle file:</b> choose an .srt or .vtt file.</p>' +
+        '<label class="field"><span class="field-label">Where it’s from</span><input class="ctl" id="ktSrc" value="' + esc(tr.src) + '" placeholder="e.g. 피식대학 ep 12, a cooking vlog"></label>' +
+        '<textarea class="ctl" id="ktText" rows="9" lang="ko" placeholder="0:01&#10;야 너 진짜 왜 그래?&#10;0:03&#10;아니 그게 아니라…">' + esc(tr.text) + '</textarea>' +
+        '<div class="ko-row"><label class="chipbtn ko-file">Choose a subtitle file<input type="file" id="ktFile" accept=".srt,.vtt,.txt,text/plain" hidden></label><span class="hint" id="ktMsg"></span><span class="spacer"></span><button type="button" class="chipbtn" data-close="1">Cancel</button><button type="button" class="chipbtn solid" data-ktgo="1">Show the lines</button></div></div></div>';
+      $('#sheet').hidden = false; $('#ktText').focus(); return;
+    }
+    const have = new Set(koCards().map(c => koKey(c.title)));
+    $('#sheet').innerHTML = head + '<p class="hint">' + tr.lines.length + ' lines. Each one you tap becomes a card, with the line as the Korean. Add meanings later, when you review or in Cards.</p><div class="ko-lines">' +
+      tr.lines.map((l, i) => { const got = have.has(koKey(l)); return '<button type="button" class="ko-line" data-ktline="' + i + '" aria-pressed="' + tr.sel.has(i) + '"' + (got ? ' disabled title="Already a card"' : '') + ' lang="ko">' + esc(l) + (got ? ' <span class="hint">card</span>' : '') + '</button>'; }).join('') + '</div>' +
+      '<div class="ko-row ko-trfoot"><button type="button" class="chipbtn" data-ktback="1">Back</button><span class="spacer"></span><span class="hint">' + tr.sel.size + ' picked</span><button type="button" class="chipbtn solid" data-ktmake="1"' + (tr.sel.size ? '' : ' disabled') + '>Make ' + (tr.sel.size || '') + ' card' + (tr.sel.size === 1 ? '' : 's') + '</button></div></div></div>';
+    $('#sheet').hidden = false;
   }
   function koAddMany(list, label) {
     snapshot(); let added = 0, dup = 0;
     list.forEach(p => { if (koByFront(p.front)) dup++; else { koAdd(p); added++; } });
     save(); render();
-    toast(added + ' card' + (added === 1 ? '' : 's') + ' added' + (label ? ' from the ' + label : '') + (dup ? ' · ' + dup + ' you already had' : ''), true);
+    toast(added + ' card' + (added === 1 ? '' : 's') + ' added' + (label ? ' from ' + label : '') + (dup ? ' · ' + dup + ' you already had' : ''), true);
   }
   function koMyDay() {
     if (!KO_ON) return '';
@@ -3065,44 +3117,58 @@
     try { speechSynthesis.onvoiceschanged = () => { if (ui.view === 'korean' && !ui.ko.q) renderMain(); }; } catch (e) { }
     $('#content').addEventListener('click', e => {
       const go = e.target.closest('[data-kogo]'); if (go) { setView('korean'); koStart(); return; }
-      if (ui.view !== 'korean') {
-        const say = e.target.closest('[data-kosay]'); if (say) koSpeak(say.dataset.kosay);
-        return;
-      }
-      const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-kog],[data-kosay],[data-kotext],[data-kohit],[data-koedit],[data-koadd],[data-kobulk],[data-kostarter],[data-komore]'); if (!b) return;
+      if (e.target.closest('[data-kaadd]')) { koAddFromRow(); return; }
+      if (ui.view !== 'korean') return;
+      const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-koknow],[data-kog],[data-kosay],[data-kohit],[data-koedit],[data-kobulk],[data-kotr],[data-kopack],[data-komore]'); if (!b) return;
       const d = b.dataset;
       if (d.kotab) { ui.ko.tab = d.kotab; renderMain(); return; }
       if (d.kostart) return koStart();
       if (d.kostop) return koStop();
       if (d.koshow) { ui.ko.shown = true; renderMain(); return; }
+      if (d.koknow) return koKnow();
       if (d.kog) return koGrade(Number(d.kog));
       if (d.kosay !== undefined) { e.stopPropagation(); koSpeak(d.kosay); return; }
-      if (d.kotext) { ui.ko.textOn = true; renderMain(); return; }
       if (d.kohit) { const c = taskById(d.kohit); if (!c) return; snapshot(); c.ko = Object.assign({}, c.ko, { hits: ((c.ko || {}).hits || 0) + 1 }); save(); renderMain(); toast('Tallied: ' + c.title + ' · heard ' + c.ko.hits + '×', true); return; }
       if (d.koedit) return koForm(d.koedit);
-      if (d.koadd) return koForm(null);
       if (d.kobulk) return koBulkForm();
-      if (d.kostarter) return koAddMany(K.STARTER, 'starter set');
-      if (d.komore) { const c = koCfg(), T = todayISO(), log = Object.assign({}, c.log); log[T] = Object.assign({ r: 0, n: 0 }, log[T]); log[T].n = Math.max(0, log[T].n - 5); koSetCfg({ log }); save(); koStart(); return; }
+      if (d.kotr) { ui.ko.tr = null; return koTrForm(); }
+      if (d.kopack) { const p = KO_PACKS.find(x => x.id === d.kopack); if (p) koAddMany(p.cards, 'the ' + p.name.toLowerCase() + ' pack'); return; }
+      if (d.komore) { const T = todayISO(), log = Object.assign({}, koCfg().log); log[T] = Object.assign({ r: 0, n: 0 }, log[T]); log[T].n = Math.max(0, log[T].n - 10); koSetCfg({ log }); save(); koStart(); return; }
     });
-    $('#content').addEventListener('keydown', e => { if (ui.view === 'korean' && e.key === 'Enter' && e.target.matches('[data-koedit]')) koForm(e.target.dataset.koedit); });
+    $('#content').addEventListener('keydown', e => { if (ui.view !== 'korean' || e.key !== 'Enter') return; if (e.target.closest && e.target.closest('.ko-addrow')) { e.preventDefault(); koAddFromRow(); } else if (e.target.matches('[data-koedit]')) koForm(e.target.dataset.koedit); });
     $('#content').addEventListener('input', e => { if (e.target.id === 'koFind') { ui.ko.find = e.target.value; const pos = e.target.selectionStart; renderMain(); const f = $('#koFind'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } } });
     $('#content').addEventListener('change', e => {
+      if (e.target.id === 'koVoice') { try { localStorage.setItem(KO_VOICE_KEY, e.target.value); } catch (x) { } koSpeak('안녕하세요, 반가워요.'); return; }
       const k = e.target.dataset && e.target.dataset.kocfg; if (!k) return;
-      koSetCfg({ [k]: e.target.type === 'checkbox' ? e.target.checked : Number(e.target.value) }); save(); renderSide(); renderMain();
+      koSetCfg({ [k]: Number(e.target.value) }); save(); renderSide(); renderMain();
     });
     $('#sheet').addEventListener('click', e => {
       const s = e.target.closest('[data-kosave]'); if (s) return koSave(s.dataset.kosave);
       const del = e.target.closest('[data-kodel]'); if (del) { const c = taskById(del.dataset.kodel); if (!c) return; snapshot(); trashTask(c); save(); closeSheet(); render(); toast('Card moved to Recently deleted', true); return; }
-      const rs = e.target.closest('[data-koreset]'); if (rs) { const c = taskById(rs.dataset.koreset); if (!c) return; snapshot(); c.ko = Object.assign({}, c.ko, { s: null, s2: null }); save(); closeSheet(); render(); toast('Card starts over as new', true); return; }
+      const rs = e.target.closest('[data-koreset]'); if (rs) { const c = taskById(rs.dataset.koreset); if (!c) return; snapshot(); c.ko = Object.assign({}, c.ko, { s: null, s2: null, known: false }); save(); closeSheet(); render(); toast('Card starts over as new', true); return; }
       if (e.target.closest('[data-kobulkgo]')) {
         const list = K.parseBulk($('#koBulk').value);
         if (!list.length) { $('#koBulkMsg').textContent = 'Nothing to add yet. Put one word per line.'; return; }
         closeSheet(); koAddMany(list); return;
       }
+      const tr = ui.ko.tr;
+      if (e.target.closest('[data-ktgo]')) {
+        tr.src = $('#ktSrc').value.trim(); tr.text = $('#ktText').value;
+        const ls = K.parseTranscript(tr.text);
+        if (!ls.length) { $('#ktMsg').textContent = 'I couldn’t find any Korean lines in that. Check it’s the Korean transcript.'; return; }
+        tr.lines = ls; tr.sel = new Set(); koTrForm(); return;
+      }
+      const ln = e.target.closest('[data-ktline]'); if (ln) { const i = Number(ln.dataset.ktline); if (tr.sel.has(i)) tr.sel.delete(i); else tr.sel.add(i); ln.setAttribute('aria-pressed', String(tr.sel.has(i))); const n = tr.sel.size, mk = $('[data-ktmake]'); mk.disabled = !n; mk.textContent = 'Make ' + (n || '') + ' card' + (n === 1 ? '' : 's'); mk.previousElementSibling.textContent = n + ' picked'; return; }
+      if (e.target.closest('[data-ktback]')) { tr.lines = null; koTrForm(); return; }
+      if (e.target.closest('[data-ktmake]')) { const list = [...tr.sel].sort((a, b) => a - b).map(i => ({ front: tr.lines[i], back: '', ex: '', src: tr.src })); ui.ko.tr = null; closeSheet(); koAddMany(list, tr.src || 'the transcript'); return; }
+    });
+    $('#sheet').addEventListener('change', e => {
+      if (e.target.id !== 'ktFile' || !e.target.files[0]) return;
+      const f = e.target.files[0]; if (ui.ko.tr && !$('#ktSrc').value.trim()) $('#ktSrc').value = f.name.replace(/\.(srt|vtt|txt)$/i, '').replace(/[._]+/g, ' ');
+      f.text().then(t => { $('#ktText').value = t; $('#ktMsg').textContent = f.name; }, () => { $('#ktMsg').textContent = 'I couldn’t read that file.'; });
     });
     $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.ko-form input.ctl')) { e.preventDefault(); const s = $('[data-kosave]'); if (s) koSave(s.dataset.kosave); } });
-    // Review keys: Space or Enter shows the answer, 1–4 rate it, R plays it again
+    // Review keys: Space or Enter shows the answer (then Space = Good), 1–4 rate it, K = I know this (new cards), R plays it again
     document.addEventListener('keydown', e => {
       if (ui.view !== 'korean' || !ui.ko.q || !$('#sheet').hidden || ui.search || e.ctrlKey || e.metaKey || e.altKey) return;
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
@@ -3111,7 +3177,8 @@
       if ((e.key === ' ' || e.key === 'Enter') && !ui.ko.shown) { ui.ko.shown = true; renderMain(); }
       else if (e.key === ' ' && ui.ko.shown) koGrade(3);
       else if (/^[1-4]$/.test(e.key) && ui.ko.shown) koGrade(Number(e.key));
-      else if (e.key === 'r' || e.key === 'R') { const c = taskById(cur.id); koSpeak(koCfg().listen && c.ko.ex && !ui.ko.shown ? c.ko.ex : c.title); }
+      else if ((e.key === 'k' || e.key === 'K') && !ui.ko.shown && cur.dir === 1 && K.isNewCard((taskById(cur.id).ko || {}).s)) koKnow();
+      else if (e.key === 'r' || e.key === 'R') koSpeak(taskById(cur.id).title);
       else if (e.key === 'Escape') koStop();
       else hit = false;
       if (hit) { e.preventDefault(); e.stopImmediatePropagation(); }

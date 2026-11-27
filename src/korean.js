@@ -76,44 +76,23 @@
     return n;
   }
 
-  // Everyday words heritage speakers often half-know, plus news and formal words. Optional, added from the Korean page.
-  const STARTER = [
-    ['어차피', 'anyway, in any case (it will happen regardless)', '어차피 늦었으니까 천천히 가자.'],
-    ['오히려', 'rather, on the contrary', '사과했더니 오히려 더 화를 냈어.'],
-    ['굳이', 'go out of one’s way to; (not) necessarily', '굳이 그렇게까지 할 필요 없어.'],
-    ['차라리', 'would rather; might as well', '이럴 바엔 차라리 혼자 갈게.'],
-    ['하필', 'of all (times, people, things)', '왜 하필 오늘 비가 와?'],
-    ['막상', 'when it actually comes to it', '막상 해보니까 생각보다 쉽더라.'],
-    ['괜히', 'for no reason; pointlessly', '괜히 말했나 봐.'],
-    ['일부러', 'on purpose', '일부러 그런 거 아니야.'],
-    ['설마', 'surely not, no way', '설마 벌써 다 먹은 거야?'],
-    ['어쩐지', 'no wonder', '어쩐지 조용하더라.'],
-    ['도대체', 'what on earth, just (what/why)', '도대체 무슨 생각을 하는 거야?'],
-    ['겨우', 'barely; only (just)', '겨우 시간 맞춰 도착했어.'],
-    ['마침', 'just then, at just the right time', '마침 잘 왔다. 이것 좀 도와줘.'],
-    ['아무리', 'no matter how', '아무리 바빠도 밥은 먹어야지.'],
-    ['게다가', 'on top of that, besides', '비싸고, 게다가 맛도 없어.'],
-    ['여전히', 'still (as before)', '그는 여전히 그 회사에 다닌다.'],
-    ['당분간', 'for the time being', '당분간 연락하지 마.'],
-    ['어이없다', 'absurd, ridiculous (leaves you speechless)', '진짜 어이없네.'],
-    ['서운하다', 'hurt, let down (by someone close)', '생일을 잊어버려서 좀 서운했어.'],
-    ['억울하다', 'to feel wronged, unfairly treated', '나만 혼나서 너무 억울해.'],
-    ['답답하다', 'frustrated; stuffy, stifling', '말이 안 통해서 답답해.'],
-    ['아깝다', 'a waste, such a shame', '이거 버리기 아까워.'],
-    ['눈치', 'tact, reading the room', '눈치 좀 챙겨.'],
-    ['핑계', 'excuse', '핑계 대지 마.'],
-    ['오해', 'misunderstanding', '오해하지 마, 그런 뜻 아니었어.'],
-    ['논란', 'controversy', '그 발언이 논란이 되고 있다.'],
-    ['의혹', 'suspicion, allegation', '새로운 의혹이 제기됐다.'],
-    ['혐의', 'charges, suspicion (of a crime)', '사기 혐의로 조사를 받고 있다.'],
-    ['갈등', 'conflict, tension', '두 사람 사이에 갈등이 생겼다.'],
-    ['대책', 'measures to deal with something', '정부가 대책을 발표했다.'],
-    ['입장', 'position, stance; official statement', '회사 측은 아직 입장을 밝히지 않았다.'],
-    ['영향을 미치다', 'to have an effect on', '날씨가 매출에 큰 영향을 미쳤다.'],
-    ['책임을 지다', 'to take responsibility', '누가 책임을 질 거예요?'],
-    ['결국', 'in the end, eventually', '결국 헤어졌대.']
-  ].map(([front, back, ex]) => ({ front, back, ex, src: 'Starter set' }));
+  /* A pasted YouTube transcript or a subtitle file (.srt / .vtt) → the Korean lines, in order, without timestamps,
+     cue numbers, sound tags like [음악] or repeats (auto-generated captions repeat lines). */
+  const HANGUL = /[\uAC00-\uD7A3]/;
+  function parseTranscript(text) {
+    const out = [];
+    for (let l of String(text || '').replace(/\r/g, '').split('\n')) {
+      l = l.replace(/<[^>]+>/g, '').replace(/\{[^}]*\}/g, '').trim();
+      if (!l || /^WEBVTT|^NOTE\b|^(Kind|Language|STYLE|REGION)\b/i.test(l) || /^\d+$/.test(l) || /-->/.test(l)) continue;
+      l = l.replace(/^\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*/, '').replace(/^\d+\s*(seconds?|minutes?|초|분)(,\s*\d+\s*(seconds?|minutes?|초|분))*\s*/i, '');
+      l = l.replace(/[\[(（][^\])）]*[\])）]/g, '').replace(/^[-–♪\s]+|[♪\s]+$/g, '').replace(/\s+/g, ' ').trim();
+      if (!l || !HANGUL.test(l)) continue;
+      if (out.length && out[out.length - 1] === l) continue;
+      out.push(l);
+    }
+    return out;
+  }
 
-  const api = { parseLine, parseBulk, sameFront, fresh, grade, ivlLabel, isDue, isNewCard, streak, addDaysISO, diffDays, STARTER };
+  const api = { parseLine, parseBulk, parseTranscript, sameFront, fresh, grade, ivlLabel, isDue, isNewCard, streak, addDaysISO, diffDays };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.TallyKo = api;
 })(typeof window !== 'undefined' ? window : globalThis);
