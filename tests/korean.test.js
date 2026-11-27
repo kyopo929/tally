@@ -38,7 +38,16 @@ eq('due', [K.isDue({ due: T }, T), K.isDue({ due: '2026-11-29' }, T), K.isDue(nu
 eq('streak counts back from today', K.streak({ '2026-11-28': { r: 3 }, '2026-11-27': { r: 1 }, '2026-11-25': { r: 9 } }, T), 2);
 eq('streak kept before today’s review', K.streak({ '2026-11-27': { r: 1 }, '2026-11-26': { r: 1 } }, T), 2);
 eq('streak broken', K.streak({ '2026-11-25': { r: 1 } }, T), 0);
-eq('starter set is complete', K.STARTER.every(c => c.front && c.back && c.ex), true);
+// word packs: every card complete, no card twice
+const PACKS = require('../src/korean-packs.js'), all = PACKS.flatMap(p => p.cards);
+eq('packs complete', all.filter(c => !c.front || !c.back || !c.ex).map(c => c.front), []);
+eq('packs have no repeats', all.length, new Set(all.map(c => c.front.replace(/\s/g, ''))).size);
+
+// transcripts and subtitle files
+eq('youtube transcript', K.parseTranscript('0:01\n[음악]\n0:03\n야 너 진짜 왜 그래?\n0:05\n야 너 진짜 왜 그래?\n1:02:10\n아니 그게 아니라'), ['야 너 진짜 왜 그래?', '아니 그게 아니라']);
+eq('timestamp on the same line', K.parseTranscript('0:12 밥 먹었어?\n0:15 (웃음) 아직 안 먹었어'), ['밥 먹었어?', '아직 안 먹었어']);
+eq('srt', K.parseTranscript('1\n00:00:01,000 --> 00:00:03,000\n<i>어차피 늦었어</i>\n\n2\n00:00:04,000 --> 00:00:06,000\n- 천천히 가자\nHello'), ['어차피 늦었어', '천천히 가자']);
+eq('vtt', K.parseTranscript('WEBVTT\nKind: captions\nLanguage: ko\n\n00:00.000 --> 00:02.000\n♪ 괜찮아 ♪'), ['괜찮아']);
 
 console.log(fail ? fail + ' failed' : 'All Korean tests passed');
 process.exit(fail ? 1 : 0);

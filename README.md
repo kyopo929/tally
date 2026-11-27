@@ -53,10 +53,12 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 
 ## Korean flashcards (original site only)
 - Shown only where `/config.js` lists `features: ['korean']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=korean` in Vercel. Works on the phone too.
-- Cards are items with `type:'kocard'` (title = the Korean; `ko` = meaning, example line, source, note, tally count, schedules). Settings and the daily review log are one item `kocfg`. They sync like everything else and stay out of task lists, search and the calendar.
-- Spaced repetition like Anki (Again / Hard / Good / Easy, new cards per day), in `src/korean.js`. Optional English → Korean direction per card.
-- Add from the add box: on the Korean page as is, elsewhere with `ko:` in front: `ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game`. A word you already have gets a tally mark instead. Paste a list (also tab-separated from a sheet, Language Reactor or Anki). Optional starter set.
-- Audio uses the device's own Korean voice (speechSynthesis). Listening mode plays the sentence before showing the text.
+- Cards are items with `type:'kocard'` (title = the Korean; `ko` = meaning, example line, source, note, tally count, known, schedules). Settings and the daily review log are one item `kocfg`. They sync like everything else and stay out of task lists, search and the calendar.
+- Spaced repetition like Anki (Again / Hard / Good / Easy, new cards per day), in `src/korean.js`. "I know this" (K) on a new card takes it out of reviews. Optional English → Korean direction per card.
+- Word packs in `src/korean-packs.js` (about 490 cards: starter set, everyday words, conversation phrases and slang, endings, news), added one pack at a time.
+- Paste a YouTube transcript (…more → Show transcript) or open an .srt/.vtt file, tap the lines you didn't catch, and they become cards.
+- Add on the Korean page with four boxes (Korean, English, the full line, show; the main add box is hidden there), or from other pages with `ko:` in front in the add box: `ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game`. A word you already have gets a tally mark instead. A word list can be pasted too.
+- Audio uses the device's own Korean voice (speechSynthesis), male when there is one (Edge on Windows: InJoon). The choice is saved per device.
 - My Day shows "Korean · N cards to review" when cards are due.
 
 ## Payments (original site only)
