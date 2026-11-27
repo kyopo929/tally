@@ -52,7 +52,7 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 - Android share sheet: manifest `share_target` → POST `/share-in` handled by sw.js (cache `tally-share`) → app opens `?share=1` and makes a note.
 
 ## Korean flashcards (original site only)
-- Shown only where `/config.js` lists `features: ['korean']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=korean` in Vercel. Works on the phone too.
+- Shown only where `/config.js` lists `features: ['korean']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=korean` in Vercel. Even there it only shows while signed in (sync on). Works on the phone too.
 - Cards are items with `type:'kocard'` (title = the Korean; `ko` = meaning, example line, source, note, tally count, known, schedules). Settings and the daily review log are one item `kocfg`. They sync like everything else and stay out of task lists, search and the calendar.
 - Spaced repetition like Anki (Again / Hard / Good / Easy, new cards per day), in `src/korean.js`. "I know this" (K) on a new card takes it out of reviews. Optional English → Korean direction per card.
 - Word packs in `src/korean-packs.js` (about 490 cards: starter set, everyday words, conversation phrases and slang, endings, news), added one pack at a time.
