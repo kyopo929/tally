@@ -41,6 +41,7 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 `node tests/parser.test.js` checks the quick-add language (dates, repeats, tags, start dates, reminders).
 `node tests/push.test.js` checks which reminders the server sends and when (time zones, per-device settings, no repeats, clearing on other devices).
 `node tests/outlook.test.js` checks reading Outlook's calendar (repeats, exceptions, time zones).
+`node tests/korean.test.js` checks Korean flashcards (reading card lines, scheduling, streaks).
 `node tests/msg.test.js` checks reading and sorting texts from the phone (broken JSON, one-time codes, people vs businesses, WhatsApp summaries).
 
 ## Notes, Documents, locks, backups
@@ -49,6 +50,14 @@ Notes: stored as items with `type:'note'`. Photos and PDFs live in IndexedDB (`t
 - Locked items: `locked:true`, `sealed` = AES-GCM(JSON {body, items, number, texts}) with a PBKDF2 key from the passphrase; the `vault` row holds salt + check. Locked files are stored and uploaded encrypted (`enc:true`). Auto-locks after 10 min idle / 5 min hidden.
 - Weekly backup: `attachments/<uid>/backups/YYYY-MM-DD.json`, last 8 kept (Settings → Automatic backups). Unreferenced files are removed from Storage after 30 days.
 - Android share sheet: manifest `share_target` → POST `/share-in` handled by sw.js (cache `tally-share`) → app opens `?share=1` and makes a note.
+
+## Korean flashcards (original site only)
+- Shown only where `/config.js` lists `features: ['korean']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=korean` in Vercel. Works on the phone too.
+- Cards are items with `type:'kocard'` (title = the Korean; `ko` = meaning, example line, source, note, tally count, schedules). Settings and the daily review log are one item `kocfg`. They sync like everything else and stay out of task lists, search and the calendar.
+- Spaced repetition like Anki (Again / Hard / Good / Easy, new cards per day), in `src/korean.js`. Optional English → Korean direction per card.
+- Add from the add box: on the Korean page as is, elsewhere with `ko:` in front: `ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game`. A word you already have gets a tally mark instead. Paste a list (also tab-separated from a sheet, Language Reactor or Anki). Optional starter set.
+- Audio uses the device's own Korean voice (speechSynthesis). Listening mode plays the sentence before showing the text.
+- My Day shows "Korean · N cards to review" when cards are due.
 
 ## Payments (original site only)
 - Shown only where `/config.js` lists `features: ['payments']`: the original site by default (`api/_cfg.js` `featuresFor`); copies get none unless they set `FEATURES=payments` in Vercel.
