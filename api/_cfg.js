@@ -12,7 +12,7 @@ function holidaysFor(req) {
 // Extra sections only the original site shows: FEATURES="payments,korean" turns them on for a copy. Default: the original gets payments and korean, copies get none.
 function featuresFor(req) {
   if (process.env.FEATURES !== undefined) return process.env.FEATURES.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  return isOriginal(req) ? ['payments', 'korean'] : [];
+  return isOriginal(req) ? ['payments', 'korean', 'spending'] : [];
 }
 function isOriginal(req) {
   const host = String((req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '').toLowerCase();
