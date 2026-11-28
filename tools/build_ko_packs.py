@@ -4,11 +4,18 @@ Sources (download first, not kept in this repo):
   - https://github.com/spellcheck-ko/korean-dict-nikl-krdict  (the dictionary XML; CC BY-SA 2.0 KR, 국립국어원)
   - https://github.com/julienshim/combined_korean_vocabulary_list results.tsv  (NIKL 2003 frequency rank, KOGL type 1, 국립국어원)
 Run: python3 tools/build_ko_packs.py <dir with *.xml> <results.tsv>
-Each card is [Korean, English, example sentence]. Packs are ordered most common first (NIKL rank, then the rest)."""
+Each card is [Korean, English, example sentence]. Packs are ordered most common first (NIKL rank, then the rest).
+Conversational only: technical, formal and textbook words listed in tools/ko_drop_words.json are left out, and only the
+idioms in tools/ko_keep_idioms.json are kept (picked by hand, helped by how often their words appear in film and TV
+subtitles: FrequencyWords' Korean OpenSubtitles 2018 list, CC BY-SA 4.0)."""
 import sys, glob, re, csv, json
 from lxml import etree
 
 xml_dir, tsv = sys.argv[1], sys.argv[2]
+import os
+HERE = os.path.dirname(os.path.abspath(__file__))
+DROP = set(json.load(open(os.path.join(HERE, 'ko_drop_words.json'), encoding='utf-8')))
+KEEP_IDIOMS = set(json.load(open(os.path.join(HERE, 'ko_keep_idioms.json'), encoding='utf-8')))
 rank = {}
 for r in csv.DictReader(open(tsv, encoding='utf-8'), delimiter='\t'):
     w = re.sub(r'\d+$', '', r['word'])
@@ -70,9 +77,11 @@ for (idiom, w), es in groups.items():
     es.sort(key=lambda e: (lvl_rank.get(e['lvl'], 3), e['order']))
     if idiom:
         front = es[0]['w'].strip()
+        if front not in KEEP_IDIOMS: continue
         pack = 'idioms'
     else:
         front = w
+        if w in DROP: continue
         lv = es[0]['lvl']
         if lv == '고급' and w not in rank: continue  # advanced: only the ones in the NIKL / TOPIK lists (common enough)
         pack = {'초급': 'beginner', '중급': 'intermediate', '고급': 'advanced'}[lv]
