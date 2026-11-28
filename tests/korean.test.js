@@ -43,11 +43,14 @@ const PACKS = require('../src/korean-packs.js'), all = PACKS.filter(p => p.cards
 // the big dictionary packs (korean/*.json): every card has Korean and English, counts match, no word twice in a pack
 const fs = require('fs');
 for (const p of PACKS.filter(p => p.big)) {
-  const rows = JSON.parse(fs.readFileSync(__dirname + '/../' + p.url, 'utf8'));
+  const rows = JSON.parse(fs.readFileSync(__dirname + '/../' + p.url.split('?')[0], 'utf8'));
   eq(p.id + ' count', rows.length, p.count);
   eq(p.id + ' complete', rows.filter(r => !r[0] || !r[1]).length, 0);
   eq(p.id + ' no repeats', new Set(rows.map(r => r[0])).size, rows.length);
 }
+// conversational only: none of the words taken out are back in a pack
+const dropped = new Set(require('../tools/ko_drop_words.json'));
+eq('no technical words in packs', PACKS.filter(p => p.big).flatMap(p => JSON.parse(fs.readFileSync(__dirname + '/../' + p.url.split('?')[0], 'utf8'))).filter(r => dropped.has(r[0])).map(r => r[0]), []);
 eq('packs complete', all.filter(c => !c.front || !c.back || !c.ex).map(c => c.front), []);
 eq('packs have no repeats', all.length, new Set(all.map(c => c.front.replace(/\s/g, ''))).size);
 

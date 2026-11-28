@@ -504,11 +504,11 @@
   // Big packs from NIKL's learners' dictionary (한국어기초사전, 국립국어원, CC BY-SA 2.0 KR), most common first.
   // Built by tools/build_ko_packs.py into korean/*.json ([Korean, English, example]); loaded only when you add one.
   const BIG = [
-    { id: 'intermediate', name: 'Intermediate words', about: 'TOPIK II level, most common first, with dictionary meanings and example sentences', count: 3575 },
-    { id: 'idioms', name: 'Idioms', about: 'Everyday expressions like 눈이 높다 and 발이 넓다', count: 2224 },
-    { id: 'advanced', name: 'Common advanced words', about: 'Advanced words that still come up often', count: 375 },
-    { id: 'beginner', name: 'Beginner words', about: 'The basics. You’ll know most of them: sort them out quickly', count: 1772 }
-  ].map(b => Object.assign(b, { url: 'korean/' + b.id + '.json', big: true }));
+    { id: 'intermediate', name: 'Intermediate words', about: 'Everyday TOPIK II level words, most common first, with dictionary meanings and example sentences', count: 3278 },
+    { id: 'idioms', name: 'Idioms', about: 'Everyday expressions like 눈이 높다 and 발이 넓다', count: 1689 },
+    { id: 'advanced', name: 'Common advanced words', about: 'Advanced words that still come up often', count: 291 },
+    { id: 'beginner', name: 'Beginner words', about: 'The basics. You’ll know most of them: sort them out quickly', count: 1758 }
+  ].map(b => Object.assign(b, { url: 'korean/' + b.id + '.json?v=2', big: true, v: 2 })); // v: bump when a pack's list changes (Tally then offers to remove words taken out)
   PACKS.push(...BIG);
   if (typeof module !== 'undefined' && module.exports) module.exports = PACKS; else root.TallyKoPacks = PACKS;
 })(typeof window !== 'undefined' ? window : globalThis);

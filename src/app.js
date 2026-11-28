@@ -2510,19 +2510,37 @@
     }
     return all;
   }
+  // Live changes arrive one row at a time; take them in together, a few times a second at most
+  let rtRows = [], rtTimer = null;
+  function queueRemote(row) {
+    rtRows.push(row);
+    if (!rtTimer) rtTimer = setTimeout(() => { rtTimer = null; const rows = rtRows; rtRows = []; applyRemote(rows); }, 300);
+  }
   function applyRemote(rows) {
     if (!rows.length) return;
-    const pend = new Set(pendingChanges().map(c => c.k));
-    let changed = false;
+    // Rows this device already has as they are (often its own changes coming back) are skipped first, cheaply:
+    // after thousands of items are added at once, checking everything for each of them froze the app for minutes.
+    const todo = [];
     for (const r of rows) {
       if (r.server_updated && (!sync.meta.lastPull || r.server_updated > sync.meta.lastPull)) sync.meta.lastPull = r.server_updated;
-      const k = r.id, j = r.deleted ? '~' : ser(r.data);
+      const j = r.deleted ? '~' : ser(r.data);
+      if (sync.meta.shadow[r.id] !== j) todo.push([r, j]);
+    }
+    if (!todo.length) { saveSyncMeta(); return; }
+    const pend = new Set(pendingChanges().map(c => c.k));
+    let changed = false;
+    // Look items up by id once, and take out replaced ones in one pass at the end (thousands of rows at once stay quick)
+    const idx = {}, gone = new Set();
+    const maps = (kind, live, bin) => idx[kind] || (idx[kind] = { live: new Map(live.map(x => [x.id, x])), bin: new Map((bin || []).map(x => [x.id, x])) });
+    for (const [r, j] of todo) {
+      const k = r.id;
       if (sync.meta.shadow[k] === j) continue;
       const kind = k.slice(0, k.indexOf(':')), id = k.slice(k.indexOf(':') + 1);
       const live = kind === 'task' ? S.tasks : kind === 'list' ? S.lists : kind === 'group' ? S.groups : null;
       if (!live) continue;
       const bin = kind === 'task' ? S.trash.tasks : kind === 'list' ? S.trash.lists : null;
-      let prev = live.find(x => x.id === id) || (bin && bin.find(x => x.id === id));
+      const m = maps(kind, live, bin);
+      let prev = m.live.get(id) || m.bin.get(id);
       let obj = r.deleted ? null : r.data;
       if (pend.has(k)) {
         // Both this device and another changed it: keep each side's changes, field by field (this device wins where both changed the same field)
@@ -2530,13 +2548,14 @@
         if (!obj || !prev || !base || base === '~') continue; // deleted on one side: this device's version stays and is sent
         obj = mergeFields(JSON.parse(base), prev, obj);
       }
-      const li = live.findIndex(x => x.id === id); if (li >= 0) live.splice(li, 1);
-      if (bin) { const bi = bin.findIndex(x => x.id === id); if (bi >= 0) bin.splice(bi, 1); }
-      if (obj) { if (kind === 'task' && prev) obj.remindedFor = prev.remindedFor; ((obj.deletedAt && bin) ? bin : live).push(obj); }
+      const lp = m.live.get(id); if (lp) { gone.add(lp); m.live.delete(id); }
+      const bp = m.bin.get(id); if (bp) { gone.add(bp); m.bin.delete(id); }
+      if (obj) { if (kind === 'task' && prev) obj.remindedFor = prev.remindedFor; const inBin = !!(obj.deletedAt && bin); (inBin ? bin : live).push(obj); (inBin ? m.bin : m.live).set(id, obj); }
       if (kind === 'task' && (!obj || obj.done || obj.deletedAt || (prev && prev.remindedFor && effectiveReminder(prev) === prev.remindedFor && effectiveReminder(obj) !== prev.remindedFor))) { const ai = alarmQueue.indexOf(id); if (ai >= 0) { alarmQueue.splice(ai, 1); setTimeout(renderAlarm, 0); } closeLocalNotif(id); }
       changed = true;
       sync.meta.shadow[k] = j;
     }
+    if (gone.size) [S.tasks, S.lists, S.groups, S.trash.tasks, S.trash.lists].forEach(a => { if (!a || !a.some(x => gone.has(x))) return; const keep = a.filter(x => !gone.has(x)); a.length = 0; keep.forEach(x => a.push(x)); });
     saveSyncMeta();
     if (changed) { persistLocal(); refreshAfterRemote(); }
   }
@@ -2612,7 +2631,7 @@
   function subscribeLive() {
     if (sync.channel) { try { sync.client.removeChannel(sync.channel); } catch (e) { } }
     sync.channel = sync.client.channel('items-' + sync.user.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: 'user_id=eq.' + sync.user.id }, p => { if (p.new && p.new.id) applyRemote([p.new]); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: 'user_id=eq.' + sync.user.id }, p => { if (p.new && p.new.id) queueRemote(p.new); })
       .subscribe();
   }
   async function signOut() {
@@ -2948,7 +2967,7 @@
     const done = koCfg().packs || {};
     return '<div class="ko-packs">' + KO_PACKS.map(p => {
       if (p.big) return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + p.count.toLocaleString() + ' words</span></div>' +
-        (done[p.id] ? '<span class="ko-added">' + I.check + 'Added</span>' : '<button type="button" class="chipbtn" data-kopack="' + p.id + '">Add ' + p.count.toLocaleString() + '</button>') + '</div>';
+        (done[p.id] === p.v ? '<span class="ko-added">' + I.check + 'Added</span>' : done[p.id] ? '<span class="ko-added">' + I.check + 'Added (older list)</span>' : '<button type="button" class="chipbtn" data-kopack="' + p.id + '">Add ' + p.count.toLocaleString() + '</button>') + '</div>';
       const left = p.cards.filter(c => !have.has(koKey(c.front))).length;
       return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + p.cards.length + ' words</span></div>' +
         (left ? '<button type="button" class="chipbtn' + (have.size ? '' : ' solid') + '" data-kopack="' + p.id + '">Add ' + left + '</button>' : '<span class="ko-added">' + I.check + 'Added</span>') + '</div>';
@@ -3010,6 +3029,8 @@
     else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min · Space shows the answer, 1–4 rate it, K if you already know a new word</span></div>';
     else h += '<div class="ko-go"><p><b>All caught up for today.</b> ' + (td.freshAll ? td.freshAll + ' new card' + (td.freshAll === 1 ? '' : 's') + ' waiting, ' + cfg.newPerDay + ' a day. ' : '') + 'Add the words you didn’t catch tonight and they’ll show up tomorrow.</p>' + (td.freshAll ? '<button type="button" class="chipbtn" data-komore="1">Learn 10 more now</button>' : '') + '</div>';
     const toSort = koSortList().length, blank = cs.filter(c => !(c.ko || {}).back && !(c.ko || {}).known).length;
+    const stale = KO_PACKS.filter(p => p.big && (cfg.packs || {})[p.id] && cfg.packs[p.id] !== p.v);
+    if (stale.length) h += '<div class="ko-tools"><div class="ko-tool ko-stale"><div><b>Word packs trimmed to everyday Korean</b><span>Technical, formal and old-fashioned words were taken out of ' + esc(stale.map(p => p.name).join(', ')) + '. Remove them from your cards too? Words you tallied or edited stay.</span></div><button type="button" class="chipbtn solid" data-kotrim="1">Remove them</button></div></div>';
     if (toSort || blank) h += '<div class="ko-tools">' +
       (toSort ? '<div class="ko-tool"><div><b>Quick sort</b><span>' + toSort.toLocaleString() + ' new word' + (toSort === 1 ? '' : 's') + ' you haven’t seen yet. Mark the ones you already know so reviews only hold real gaps. About 2 seconds a word.</span></div><button type="button" class="chipbtn solid" data-kosort="1">Sort words</button></div>' : '') +
       (blank ? '<div class="ko-tool"><div><b>' + blank + ' card' + (blank === 1 ? '' : 's') + ' without a meaning</b><span>Copy them, paste into a chat with Claude, then paste the answer back.</span></div><button type="button" class="chipbtn" data-komeancopy="1">Copy for Claude</button><button type="button" class="chipbtn" data-komeanpaste="1">Paste meanings</button></div>' : '') + '</div>';
@@ -3161,7 +3182,7 @@
       const r = await fetch(p.url, { cache: 'no-cache' }); if (!r.ok) throw new Error(r.status);
       const rows = await r.json();
       snapshot();
-      koSetCfg({ packs: Object.assign({}, koCfg().packs, { [p.id]: true }) });
+      koSetCfg({ packs: Object.assign({}, koCfg().packs, { [p.id]: p.v }) });
       koAddMany(rows.map(([front, back, ex]) => ({ front, back, ex, src: p.name })), 'the ' + p.name.toLowerCase() + ' pack', true);
     } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Add ' + p.count.toLocaleString(); } toast('Couldn’t load that pack. Check you’re online and try again.'); }
   }
@@ -3267,6 +3288,27 @@
     save(); closeSheet(); render(); toast('Progress reset: every card is new again', true);
   }
 
+  // A pack's list changed: remove the cards that were taken out of it (unless you tallied, edited or made notes on them)
+  async function koTrim(btn) {
+    const cfg = koCfg(), stale = KO_PACKS.filter(p => p.big && (cfg.packs || {})[p.id] && cfg.packs[p.id] !== p.v);
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    try {
+      const lists = await Promise.all(stale.map(p => fetch(p.url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })));
+      snapshot();
+      let n = 0;
+      stale.forEach((p, i) => {
+        const keep = new Set(lists[i].map(r => koKey(r[0]))), byFront = new Map(lists[i].map(r => [koKey(r[0]), r]));
+        const gone = koCards().filter(c => { const k = c.ko || {}; return k.src === p.name && !keep.has(koKey(c.title)) && !k.hits && !k.note && !k.rev; });
+        const ids = new Set(gone.map(c => c.id));
+        gone.forEach(c => sync.okDel.add('task:' + c.id)); // a deliberate clean-up, not a sync accident: don't ask about it
+        S.tasks = S.tasks.filter(t => !ids.has(t.id)); n += gone.length;
+        // the cards that stay pick up any improved meaning or example from the new list, unless you changed them
+        koCards().forEach(c => { const k = c.ko || {}, r = byFront.get(koKey(c.title)); if (r && k.src === p.name && !k.note) c.ko = Object.assign({}, k, { back: r[1] || k.back, ex: r[2] || k.ex }); });
+      });
+      koSetCfg({ packs: Object.assign({}, koCfg().packs, Object.fromEntries(stale.map(p => [p.id, p.v]))) });
+      save(); render(); toast(n.toLocaleString() + ' technical and old-fashioned word' + (n === 1 ? '' : 's') + ' removed', true);
+    } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Remove them'; } toast('Couldn’t load the word lists. Check you’re online and try again.'); }
+  }
   function koMyDay() {
     if (!koOn()) return '';
     const n = koCount(); if (!n) return '';
@@ -3283,7 +3325,7 @@
       const bm = e.target.closest('[data-kobm]'); if (bm) { e.preventDefault(); toast('Drag this button up to your bookmarks bar. Clicking it here does nothing.'); return; }
       if (e.target.closest('[data-kobmcopy]')) { try { navigator.clipboard.writeText(koBookmarklet()).then(() => toast('Copied. Make a new bookmark and paste this as its address.'), () => toast('Your browser blocked the clipboard here')); } catch (x) { toast('Your browser blocked the clipboard here'); } return; }
       if (ui.view !== 'korean') return;
-      const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-koknow],[data-kog],[data-kosay],[data-kohit],[data-koedit],[data-kobulk],[data-kotr],[data-kopack],[data-komore],[data-kosort],[data-kosortgo],[data-kosortpeek],[data-kosortback],[data-kosortstop],[data-kosortall],[data-komeancopy],[data-komeanpaste],[data-koreset-all],[data-koword]'); if (!b) return;
+      const b = e.target.closest('[data-kotab],[data-kostart],[data-kostop],[data-koshow],[data-koknow],[data-kog],[data-kosay],[data-kohit],[data-koedit],[data-kobulk],[data-kotr],[data-kopack],[data-komore],[data-kosort],[data-kosortgo],[data-kosortpeek],[data-kosortback],[data-kosortstop],[data-kosortall],[data-komeancopy],[data-komeanpaste],[data-koreset-all],[data-koword],[data-kotrim]'); if (!b) return;
       const d = b.dataset;
       if (d.kosort) return koSortStart();
       if (d.kosortgo) return koSortMark(d.kosortgo);
@@ -3294,6 +3336,7 @@
       if (d.komeancopy) return koMeanCopy();
       if (d.komeanpaste) return koMeanForm();
       if (d.koresetAll) return koResetForm();
+      if (d.kotrim) return koTrim(b);
       if (d.koword) return koWordCard(b);
       if (d.kotab) { ui.ko.tab = d.kotab; renderMain(); return; }
       if (d.kostart) return koStart();
