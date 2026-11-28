@@ -44,8 +44,9 @@ begin
   -- WhatsApp updates the same notification as more messages arrive: don't file a message twice
   if lastm is not null and lastm->>'text' = body and now_ms - (lastm->>'at')::bigint < 15 * 60000 then return 'dup'; end if;
   msgs := msgs || jsonb_build_array(jsonb_build_object('at', now_ms, 'text', body));
-  if jsonb_array_length(msgs) > 12 then
-    msgs := (select jsonb_agg(x order by i) from jsonb_array_elements(msgs) with ordinality a(x, i) where i > jsonb_array_length(msgs) - 12);
+  -- keep the last 12 from a person, 40 from a business (bank texts wait there until Tally turns them into expenses)
+  if jsonb_array_length(msgs) > (case when p_person then 12 else 40 end) then
+    msgs := (select jsonb_agg(x order by i) from jsonb_array_elements(msgs) with ordinality a(x, i) where i > jsonb_array_length(msgs) - (case when p_person then 12 else 40 end));
   end if;
   -- a nudge an hour later if it's still waiting for a reply; overnight ones wait until 6am
   nudge := null;

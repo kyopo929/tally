@@ -8,6 +8,8 @@
   const todayISO = () => D.toISO(new Date());
   const PAY_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('payments') && !/Android/i.test(navigator.userAgent || ''); // Payments section: original site only (api/_cfg.js), and not on the Android phone
   const isPay = t => !!t && t.type === 'payment';
+  const SP_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('spending'); // Spending: original site only (api/_cfg.js), on every device
+  const isSpend = t => !!t && t.type === 'spend';
   const KO_ON = (((window.TALLY_CONFIG || {}).features) || []).includes('korean'); // Korean flashcards: original site only (api/_cfg.js), on every device
   const isKo = t => !!t && t.type === 'kocard';
   // ...and only while you're signed in (sync on), so someone opening the address without your account doesn't see it.
@@ -61,6 +63,7 @@
     star: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M12 12.3l1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z" fill="currentColor" stroke-width="1"/></svg>',
     meet: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M15.6 14.3a4.5 4.5 0 015 4.2"/></svg>',
     chat: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v11H9l-4.5 3.5V5.5z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
+    wallet: '<svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 016.5 5H18v3"/><rect x="4" y="7.5" width="16" height="12" rx="2.5"/><path d="M16 13.5h.01"/></svg>',
     folder: '<svg viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg>'
   };
 
@@ -588,6 +591,7 @@
     docs: { title: 'Important Documents', icon: I.idcard, cls: 'ico-docs' },
     journal: { title: 'Journal', icon: I.journal, cls: 'ico-journal' },
     payments: { title: 'Payments', icon: I.pay, cls: 'ico-pay' },
+    spend: { title: 'Spending', icon: I.wallet, cls: 'ico-spend' },
     korean: { title: 'Korean', icon: '<span class="ko-glyph" lang="ko">한</span>', cls: 'ico-ko' }
   };
   function viewCount(v) {
@@ -881,7 +885,7 @@
   function renderSide() {
     let h = '<nav class="nav">';
     const overdue = open().filter(t => t.due && t.due < todayISO()).length;
-    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [], koOn() ? ['korean'] : [])) {
+    for (const v of ['myday', 'calendar', 'all', 'notes', 'journal'].concat(PAY_ON ? ['payments'] : [], SP_ON ? ['spend'] : [], koOn() ? ['korean'] : [])) {
       const c = viewCount(v);
       h += '<button type="button" class="nav-item" data-view="' + v + '" aria-current="' + (!ui.search && (ui.view === v || (v === 'notes' && paperView(ui.view)) || (v === 'journal' && ui.view === 'jlink'))) + '"><span class="' + VIEWS[v].cls + '">' + VIEWS[v].icon + '</span><span class="label">' + VIEWS[v].title + '</span>' +
         (c !== '' && c ? '<span class="count' + ((v === 'myday' || v === 'all') && overdue ? ' hot' : '') + '">' + c + '</span>' : '') + '</button>';
@@ -998,7 +1002,7 @@
     if (ui.search) {
       const q = ui.search.toLowerCase();
       const tq = q.replace(/^@/, '');
-      const hit = t => !isPaper(t) && !isMsg(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && !isKo(t) && t.type !== 'kocfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
+      const hit = t => !isPaper(t) && !isMsg(t) && t.type !== 'vault' && t.type !== 'page' && !isPay(t) && t.type !== 'paycfg' && !isKo(t) && t.type !== 'kocfg' && !isSpend(t) && t.type !== 'spendcfg' && taskInScope(t) && (attHit(t, q) || tagsOf(t).some(g => g.includes(tq)) || (q[0] !== '@' && (t.title.toLowerCase().includes(q)) ) || (t.notes || '').toLowerCase().includes(q) || t.steps.some(x => x.title.toLowerCase().includes(q)));
       const found = sortTasks(S.tasks.filter(t => !t.done && hit(t)));
       const doneFound = S.tasks.filter(t => t.done && hit(t)).sort((a, b) => b.doneAt - a.doneAt);
       title = 'Search'; sub = '\u201c' + ui.search + '\u201d';
@@ -1087,6 +1091,9 @@
     } else if (v === 'payments') {
       if (!PAY_ON) { ui.view = 'myday'; return renderMain(); }
       ({ title, sub, html, actions } = renderPayments());
+    } else if (v === 'spend') {
+      if (!SP_ON) { ui.view = 'myday'; return renderMain(); }
+      ({ title, sub, html, actions } = renderSpend());
     } else if (v === 'korean') {
       if (!koOn()) { ui.view = 'myday'; return renderMain(); }
       ({ title, sub, html, actions } = renderKorean());
@@ -1149,7 +1156,8 @@
     const onNotes = (paperView(v) || v === 'journal' || v === 'jlink') && !ui.search; if (v !== 'docs') ui.docSel = null;
     document.body.classList.toggle('onpay', v === 'payments' && !ui.search);
     const onKo = v === 'korean' && !ui.search; document.body.classList.toggle('onko', onKo); document.body.classList.toggle('koreview', onKo && !!(ui.ko && ui.ko.q));
-    if (KO_ON && !ui.qaEvent) { $('#qa').placeholder = onKo ? (isPhone() ? 'Add a Korean card' : 'Add a card: 어차피 = anyway | the line you heard #show') : (isPhone() ? 'Add a task' : 'Add a task, e.g. dentist fri 3pm'); updatePreview(); }
+    const onSp = SP_ON && v === 'spend' && !ui.search;
+    if ((KO_ON || SP_ON) && !ui.qaEvent) { $('#qa').placeholder = onSp ? (isPhone() ? 'Add spending: 45 lunch' : 'Add spending: 45 lunch, 120 carrefour card, +500 gift') : onKo ? (isPhone() ? 'Add a Korean card' : 'Add a card: 어차피 = anyway | the line you heard #show') : (isPhone() ? 'Add a task' : 'Add a task, e.g. dentist fri 3pm'); updatePreview(); }
     $('#content').classList.toggle('notesview', onNotes); document.body.classList.toggle('onnotes', onNotes);
     if (onNotes) { masonry(); hydrate($('#content')); requestAnimationFrame(() => { if (paperView(ui.view) && !ui.search) { masonry(); } }); }
   }
@@ -1766,12 +1774,14 @@
     const v = $('#qa').value.trim(), el = $('#qaPreview');
     el.classList.toggle('idle', !v && !ui.qaEvent);
     if (!v && ui.qaEvent) { el.innerHTML = 'Adding an <b>event</b>' + (ui.qaDate ? ' on ' + esc(D.dueLabel(ui.qaDate)) : '') + '. It shows on your calendar without a checkbox. <button type="button" class="example" id="qaTaskMode">Add a task instead</button>'; return; }
+    if (!v && SP_ON && ui.view === 'spend' && !ui.search && !ui.qaEvent) { el.innerHTML = spendPreview(''); return; }
     if (!v && koOn() && ui.view === 'korean' && !ui.search) { el.innerHTML = 'Try <button type="button" class="example" data-ex="막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix">막상 = when it actually comes to it | 막상 해보니까 쉽더라 #Netflix</button>'; return; }
     if (!v) {
       el.innerHTML = 'Try <button type="button" class="example" data-ex="Pay rent every month on the 1st 9am">Pay rent every month on the 1st 9am</button> or <button type="button" class="example" data-ex="Call mom tomorrow 6pm">Call mom tomorrow 6pm</button>';
       return;
     }
     if (koOn() && !ui.qaEvent && (/^ko\s*:/i.test(v) || (ui.view === 'korean' && !ui.search))) { el.innerHTML = koPreview(v); return; }
+    if (SP_ON && !ui.qaEvent && ui.view === 'spend' && !ui.search) { el.innerHTML = spendPreview(v); return; }
     const p = quickParse(v);
     const icon = { date: I.cal, recur: I.repeat, list: I.folder, warn: I.x, rem: I.bell, tag: I.tag, start: I.up, event: I.star };
     const defaultList = currentDefaultList();
@@ -1787,6 +1797,7 @@
     const inp = $('#qa'), v0 = inp.value.trim();
     if (!v0) return;
     if (koOn() && !ui.qaEvent && (/^ko\s*:/i.test(v0) || (ui.view === 'korean' && !ui.search)) && koQuick(v0)) return;
+    if (SP_ON && !ui.qaEvent && ui.view === 'spend' && !ui.search && spendQuick(v0)) return;
     const wt = parseWaiting(v0), v = wt ? wt.rest : v0;
     const p = quickParse(v);
     const listId = p.isEvent ? 'inbox' : (p.listId || currentDefaultList().id);
@@ -2570,6 +2581,7 @@
     return out;
   }
   function refreshAfterRemote() {
+    if (SP_ON) setTimeout(spendScan, 0);
     rollEvents();
     if (!S.lists.some(l => l.id === 'inbox')) S.lists.unshift({ id: 'inbox', name: 'Tasks', groupId: null, color: '#607089', system: true });
     if (ui.selected && !taskById(ui.selected)) ui.selected = null;
@@ -6210,6 +6222,7 @@
     const ppl = which === 'people' ? ms.filter(t => t.person) : [], biz = which === 'biz' ? ms.filter(t => !t.person) : [];
     let h = '';
     if (ppl.length) h += '<div class="section"><div class="section-head">Messages to answer <span class="n">' + ppl.length + '</span></div><div class="msgs">' + ppl.map(msgRow).join('') + '</div></div>';
+    if (SP_ON) { const spent = spendSeen(), keep = biz.map(t => Object.assign({}, t, { msgs: (t.msgs || []).filter(m => !spent.has(t.id + ':' + m.at)) })).filter(x => x.msgs.length); biz.length = 0; keep.forEach(x => biz.push(x)); } // bank texts that became expenses
     if (biz.length) {
       const shown = ui.showDone.msgbiz !== false; // open unless you fold it
       h += '<div class="section"><div class="section-head"><button type="button" data-done-toggle="msgbiz" aria-expanded="' + shown + '">' + I.chev + 'Other texts <span class="n">' + biz.length + '</span></button>' +
@@ -6327,6 +6340,160 @@
     });
     $('#menu').addEventListener('click', e => { if (e.target.closest('[data-mact="msgs"]')) { e.stopPropagation(); ui.menu = null; renderMenu(); openMsgSetup(); } }, true);
     setTimeout(tidyMsgs, 5000); setInterval(tidyMsgs, 3600000);
+  }
+
+  /* ---------- Spending (personal; original site only, api/_cfg.js features 'spending') ----------
+     Each expense is an item type:'spend': title (shop or what), amt, cur, cat, day (ISO), kind 'out'|'in', via, note;
+     from a bank text also acct (how the bank names the card/account) and key (the text it came from).
+     One item type:'spendcfg' holds cfg: accts {acct: 'personal'|'work'}, labels {acct: 'Debit card …8938'}, cats {shop name: category}.
+     Bank texts arrive as "Other texts" (Texts & WhatsApp); spendScan turns them into expenses. Work cards and accounts are skipped;
+     a card or account seen for the first time waits for you to say which it is. Ids come from the text, so two devices never double up. */
+  const SP = window.TallySpend;
+  function spCfg(create) {
+    let c = S.tasks.filter(t => t.type === 'spendcfg').sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (!c && create) c = newTask({ id: 'spendcfg', type: 'spendcfg', title: 'Spending settings', cfg: {} });
+    return Object.assign({ accts: {}, labels: {}, cats: {} }, c ? c.cfg : {}, { item: c || null });
+  }
+  function spSetCfg(patch) { const c = spCfg(true).item; c.cfg = Object.assign({}, c.cfg, patch); }
+  const spItems = () => S.tasks.filter(isSpend);
+  const spHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+  // Keys of bank texts already turned into expenses (or skipped as work): hidden from Other texts
+  function spendSeen() { const cfg = spCfg(); return new Set(spItems().filter(t => t.key).map(t => t.key).concat(cfg.skipped || [])); }
+  function spendScan() {
+    if (!SP_ON || !SP) return;
+    const cfg = spCfg(), have = new Set(spItems().map(t => t.id)), skipped = new Set(cfg.skipped || []);
+    let added = 0, skip = 0;
+    for (const t of S.tasks) {
+      if (!isMsg(t) || t.person || t.src !== 'sms') continue;
+      for (const m of t.msgs || []) {
+        const key = t.id + ':' + m.at, id = 'sp-' + spHash(key);
+        if (have.has(id) || skipped.has(key)) continue;
+        const r = SP.parseBank(m.text); if (!r) continue;
+        if (cfg.accts[r.acct] === 'work') { skipped.add(key); skip++; continue; }
+        const cat = cfg.cats[r.name.toLowerCase()] || r.cat;
+        newTask({ id, type: 'spend', title: r.name, amt: r.amount, cur: r.cur, cat, day: D.toISO(new Date(m.at)), kind: r.kind, via: r.acctLabel, acct: r.acct, key, bank: t.name, createdAt: m.at });
+        have.add(id); added++;
+        if (!cfg.labels[r.acct]) { cfg.labels[r.acct] = r.acctLabel; spSetCfg({ labels: Object.assign({}, cfg.labels) }); }
+      }
+    }
+    if (skip) spSetCfg({ skipped: [...skipped].slice(-1500) });
+    if (added || skip) { save(); if (ui.view === 'spend' || ui.view === 'myday') renderMain(); renderSide(); }
+  }
+  // Cards and accounts you haven't sorted yet hold their expenses back from the totals
+  const spMine = t => !t.acct || spCfg().accts[t.acct] === 'personal';
+  function spSetAcct(acct, who) {
+    const cfg = spCfg(); snapshot();
+    spSetCfg({ accts: Object.assign({}, cfg.accts, { [acct]: who }) });
+    if (who === 'work') { const xs = spItems().filter(t => t.acct === acct); spSetCfg({ skipped: (cfg.skipped || []).concat(xs.map(t => t.key)).slice(-1500) }); S.tasks = S.tasks.filter(t => !xs.includes(t)); }
+    save(); render(); toast((cfg.labels[acct] || 'That card') + (who === 'work' ? ' is work: its texts are skipped from now on' : ' is personal: its spending is counted'), true);
+  }
+  const spMoney = (n, cur) => (cur || 'AED') + ' ' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const spMonth = () => ui.spMonth || todayISO().slice(0, 7);
+  function spMonthName(ym) { const [y, m] = ym.split('-').map(Number); return D.MON_SHORT[m - 1] + ' ' + y; }
+  function spShiftMonth(ym, n) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function spDayLabel(iso) { const T = todayISO(); if (iso === T) return 'Today'; if (iso === D.toISO(D.addDays(new Date(), -1))) return 'Yesterday'; const d = D.fromISO(iso); return D.WD_LONG[d.getDay()].slice(0, 3) + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate(); }
+  function renderSpend() {
+    const ym = spMonth(), cfg = spCfg(), all = spItems();
+    const actions = '';
+    const bar = '<div class="sp-top"><div class="sp-nav"><button type="button" class="iconbtn" data-spm="-1" aria-label="Previous month">' + I.left + '</button><span>' + esc(spMonthName(ym)) + '</span><button type="button" class="iconbtn" data-spm="1" aria-label="Next month"' + (ym >= todayISO().slice(0, 7) ? ' disabled' : '') + '>' + I.right + '</button></div><button type="button" class="chipbtn solid" data-spedit="new">' + I.plus + 'Add</button></div>';
+    let html = bar;
+    // New cards and accounts from the bank: yours or work?
+    const ask = [...new Set(all.filter(t => t.acct && !cfg.accts[t.acct]).map(t => t.acct))];
+    ask.forEach(a => {
+      const xs = all.filter(t => t.acct === a).sort((x, y) => y.createdAt - x.createdAt), l = xs[0];
+      html += '<div class="sp-ask"><div><b>' + esc(cfg.labels[a] || l.via) + '</b> from ' + esc(l.bank || 'your bank') + ': ' + xs.length + ' transaction' + (xs.length === 1 ? '' : 's') + ', latest ' + esc(l.title) + ' ' + esc(spMoney(l.amt, l.cur)) + '. Is this card or account yours or work?</div>' +
+        '<div class="row-btns"><button type="button" class="chipbtn solid" data-spacct="' + esc(a) + '" data-who="personal">Personal</button><button type="button" class="chipbtn" data-spacct="' + esc(a) + '" data-who="work">Work (skip it)</button></div></div>';
+    });
+    const xs = all.filter(t => (t.day || '').slice(0, 7) === ym && spMine(t));
+    const out = xs.filter(t => t.kind !== 'in'), inn = xs.filter(t => t.kind === 'in');
+    const sum = (arr, cur) => arr.filter(t => (t.cur || 'AED') === cur).reduce((a, t) => a + (Number(t.amt) || 0), 0);
+    const curs = [...new Set(xs.map(t => t.cur || 'AED'))].filter(c => c !== 'AED');
+    const spent = sum(out, 'AED'), got = sum(inn, 'AED');
+    const prev = all.filter(t => (t.day || '').slice(0, 7) === spShiftMonth(ym, -1) && spMine(t) && t.kind !== 'in');
+    const prevSum = sum(prev, 'AED');
+    html += '<div class="sp-cards"><div class="sp-card"><span>Spent</span><b>' + esc(spMoney(spent)) + '</b>' + (curs.length ? '<small>+ ' + curs.map(c => esc(spMoney(sum(out, c), c))).join(', ') + '</small>' : '') + (prev.length ? '<small>' + esc(spMonthName(spShiftMonth(ym, -1))) + ': ' + esc(spMoney(prevSum)) + '</small>' : '') + '</div>' +
+      '<div class="sp-card"><span>Money in</span><b>' + esc(spMoney(got)) + '</b><small>' + xs.length + ' item' + (xs.length === 1 ? '' : 's') + ' this month</small></div></div>';
+    if (!xs.length) {
+      html += '<div class="empty"><strong>Nothing for ' + esc(spMonthName(ym)) + ' yet</strong>Bank texts for your personal cards land here by themselves. For cash, type something like <b>45 lunch</b> in the add box.</div>';
+      return { title: 'Spending', sub: '', actions, html };
+    }
+    // By category
+    const byCat = {}; out.filter(t => (t.cur || 'AED') === 'AED').forEach(t => { byCat[t.cat || 'Other'] = (byCat[t.cat || 'Other'] || 0) + Number(t.amt || 0); });
+    const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]), top = cats.length ? cats[0][1] : 1;
+    if (cats.length) html += '<div class="section"><div class="section-head">By category</div><div class="sp-cats">' + cats.map(([c, v]) =>
+      '<button type="button" class="sp-cat' + (ui.spCat === c ? ' on' : '') + '" data-spcat="' + esc(c) + '"><span class="sp-cname">' + esc(c) + '</span><span class="sp-bar"><i style="width:' + Math.max(2, Math.round(v / top * 100)) + '%"></i></span><span class="sp-amt">' + esc(spMoney(v)) + '</span></button>').join('') + '</div></div>';
+    // The list, by day
+    const shown = xs.filter(t => !ui.spCat || (t.cat || 'Other') === ui.spCat).sort((a, b) => (b.day || '').localeCompare(a.day || '') || b.createdAt - a.createdAt);
+    const days = [...new Set(shown.map(t => t.day))];
+    html += '<div class="section"><div class="section-head">' + (ui.spCat ? esc(ui.spCat) + ' <button type="button" class="sect-act" data-spcat="">Show all</button>' : 'All') + '</div>' + days.map(d => {
+      const ds = shown.filter(t => t.day === d), tot = sum(ds.filter(t => t.kind !== 'in'), 'AED');
+      return '<div class="sp-day"><div class="sp-dayhead"><span>' + esc(spDayLabel(d)) + '</span>' + (tot ? '<span>' + esc(spMoney(tot)) + '</span>' : '') + '</div>' + ds.map(t =>
+        '<button type="button" class="sp-row" data-spedit="' + esc(t.id) + '"><span class="sp-what"><b>' + esc(t.title) + '</b><small>' + esc(t.cat || 'Other') + (t.via ? ' · ' + esc(t.via) : '') + (t.note ? ' · ' + esc(t.note) : '') + '</small></span><span class="sp-amt' + (t.kind === 'in' ? ' in' : '') + '">' + (t.kind === 'in' ? '+' : '') + esc(spMoney(t.amt, t.cur)) + '</span></button>').join('') + '</div>';
+    }).join('') + '</div>';
+    return { title: 'Spending', sub: '', actions, html };
+  }
+  // The add box on the Spending page
+  function spendPreview(v) {
+    if (!v) return 'Add cash spending: <button type="button" class="example" data-ex="45 lunch">45 lunch</button> <button type="button" class="example" data-ex="120 carrefour card">120 carrefour card</button> <button type="button" class="example" data-ex="+500 gift">+500 gift</button> (a + is money in)';
+    const r = SP.parseQuick(v); if (!r) return '<span class="hint">Type an amount and what it was for, like <b>45 lunch</b></span>';
+    return '<span class="tok list" style="background:transparent;padding-left:0">' + esc(r.name) + '</span><span class="tok date">' + (r.kind === 'in' ? '+' : '') + esc(spMoney(r.amount, r.cur)) + '</span><span class="tok tag">' + esc(spCfg().cats[r.name.toLowerCase()] || r.cat) + '</span><span class="tok list">' + esc(r.via) + '</span><span class="hint">Enter to add for today</span>';
+  }
+  function spendQuick(v) {
+    const r = SP.parseQuick(v); if (!r) { toast('Type an amount and what it was for, like 45 lunch'); return true; }
+    snapshot();
+    const day = spMonth() === todayISO().slice(0, 7) ? todayISO() : spMonth() + '-01';
+    newTask({ type: 'spend', title: r.name, amt: r.amount, cur: r.cur, cat: spCfg().cats[r.name.toLowerCase()] || r.cat, day, kind: r.kind, via: r.via });
+    $('#qa').value = ''; save(); render(); updatePreview();
+    toast('Added ' + r.name + ', ' + spMoney(r.amount, r.cur), true); return true;
+  }
+  function openSpendEdit(id) {
+    const t = id === 'new' ? null : taskById(id), x = t || { title: '', amt: '', cur: 'AED', cat: 'Other', day: todayISO(), kind: 'out', via: 'Cash', note: '' };
+    const cfg = spCfg(), vias = [...new Set(['Cash', 'Card', 'Bank transfer'].concat(Object.entries(cfg.labels).filter(([a]) => cfg.accts[a] === 'personal').map(([, l]) => l)))];
+    const el = $('#sheet');
+    el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="spTitle"><div class="sheet-head"><h2 id="spTitle">' + (t ? 'Edit' : 'Add spending') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body sp-form">' +
+      '<div class="sp-kind"><label><input type="radio" name="spKind" value="out"' + (x.kind !== 'in' ? ' checked' : '') + '> Spent</label><label><input type="radio" name="spKind" value="in"' + (x.kind === 'in' ? ' checked' : '') + '> Money in</label></div>' +
+      '<div class="field"><label for="spAmt">Amount</label><div style="display:flex;gap:8px"><select class="ctl" id="spCur" style="width:auto">' + ['AED', 'USD', 'EUR', 'GBP', 'KRW'].concat(['AED', 'USD', 'EUR', 'GBP', 'KRW'].includes(x.cur) ? [] : [x.cur]).map(c => '<option' + (c === x.cur ? ' selected' : '') + '>' + c + '</option>').join('') + '</select><input class="ctl" id="spAmt" type="number" inputmode="decimal" step="0.01" min="0" value="' + esc(x.amt) + '"></div></div>' +
+      '<div class="field"><label for="spWhat">What or where</label><input class="ctl" id="spWhat" value="' + esc(x.title) + '" placeholder="Lunch, Carrefour…"></div>' +
+      '<div class="field"><label for="spCatSel">Category</label><select class="ctl" id="spCatSel">' + SP.CATS.map(c => '<option' + (c === x.cat ? ' selected' : '') + '>' + c + '</option>').join('') + '</select>' + (t && t.key ? '<span class="hint">Changing it also sorts future texts from ' + esc(x.title) + '.</span>' : '') + '</div>' +
+      '<div class="field"><label for="spDay">Date</label><input class="ctl" id="spDay" type="date" value="' + esc(x.day) + '"></div>' +
+      '<div class="field"><label for="spVia">Paid with</label><input class="ctl" id="spVia" list="spVias" value="' + esc(x.via || '') + '"><datalist id="spVias">' + vias.map(v => '<option value="' + esc(v) + '">').join('') + '</datalist></div>' +
+      '<div class="field"><label for="spNote">Note</label><input class="ctl" id="spNote" value="' + esc(x.note || '') + '"></div>' +
+      (t && t.key ? '<p class="hint">From a text by ' + esc(t.bank || 'your bank') + '.</p>' : '') +
+      '<div class="row-btns" style="margin-top:12px"><button type="button" class="chipbtn solid" id="spSave">Save</button>' + (t ? '<button type="button" class="chipbtn danger" id="spDel">Delete</button>' : '') + '</div></div></div>';
+    el.hidden = false; setTimeout(() => (t ? $('#spWhat') : $('#spAmt')).focus(), 30);
+    $('#spSave').onclick = () => {
+      const amt = Number($('#spAmt').value); if (!(amt > 0)) { $('#spAmt').focus(); toast('Enter an amount'); return; }
+      const what = $('#spWhat').value.trim() || 'Expense', cat = $('#spCatSel').value;
+      snapshot();
+      const it = t || newTask({ type: 'spend' });
+      if (t && t.key && cat !== t.cat) { // learn: this shop goes in this category from now on, here and in your other texts from it
+        spSetCfg({ cats: Object.assign({}, spCfg().cats, { [what.toLowerCase()]: cat }) });
+        spItems().forEach(o => { if (o !== t && o.key && !o.catHand && (o.title || '').toLowerCase() === what.toLowerCase()) o.cat = cat; });
+      }
+      if (t && cat !== t.cat) it.catHand = true;
+      Object.assign(it, { title: what, amt, cur: $('#spCur').value, cat, day: $('#spDay').value || todayISO(), kind: document.querySelector('input[name="spKind"]:checked').value, via: $('#spVia').value.trim(), note: $('#spNote').value.trim() });
+      closeSheet(); save(); render(); toast(t ? 'Saved' : 'Added ' + what, true);
+    };
+    if (t) $('#spDel').onclick = () => {
+      snapshot();
+      if (t.key) spSetCfg({ skipped: (spCfg().skipped || []).concat(t.key).slice(-1500) }); // a deleted bank text doesn't come back
+      S.tasks = S.tasks.filter(o => o !== t); closeSheet(); save(); render(); toast('Deleted', true);
+    };
+  }
+  function bindSpend() {
+    $('#content').addEventListener('click', e => {
+      if (ui.view !== 'spend') return;
+      const m = e.target.closest('[data-spm]'); if (m) { ui.spMonth = spShiftMonth(spMonth(), Number(m.dataset.spm)); ui.spCat = null; renderMain(); return; }
+      const c = e.target.closest('[data-spcat]'); if (c) { ui.spCat = c.dataset.spcat && ui.spCat !== c.dataset.spcat ? c.dataset.spcat : null; renderMain(); return; }
+      const a = e.target.closest('[data-spacct]'); if (a) { spSetAcct(a.dataset.spacct, a.dataset.who); return; }
+      const ed = e.target.closest('[data-spedit]'); if (ed) { openSpendEdit(ed.dataset.spedit); return; }
+    });
+    $('#viewActions') && $('#viewActions').addEventListener('click', e => {
+      if (ui.view !== 'spend') return;
+      const m = e.target.closest('[data-spm]'); if (m) { ui.spMonth = spShiftMonth(spMonth(), Number(m.dataset.spm)); ui.spCat = null; renderMain(); return; }
+      if (e.target.closest('[data-spedit]')) openSpendEdit('new');
+    });
+    setTimeout(spendScan, 3000); setInterval(spendScan, 60000);
   }
 
   function bindWaiting() {
@@ -6549,7 +6716,7 @@
   });
   setTimeout(() => refreshOutlook(), 1500); setInterval(() => refreshOutlook(), 30 * 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOutlook(); });
   rollEvents(); purgeTrash(); refreshHolidays(); setInterval(() => { rollEvents(); purgeTrash(); updateBadge(); refreshHolidays(); uploadPending(); gcFiles(); runOcr(); autoExpiryScan(); }, 3600000);
-  bindNotes(); bindJournal(); bindPay(); bindKorean(); bindMsgs(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
+  bindNotes(); bindJournal(); bindPay(); bindKorean(); bindMsgs(); if (SP_ON) bindSpend(); setupCalFit(); bindNoteLists(); bindWaiting(); bindPages(); bindIcs(); setTimeout(gcFiles, 60000); setTimeout(runOcr, 20000); setTimeout(() => {
     let ch = 0;
     const gone = S.tasks.filter(t => (t.renewFor && !t.expFor && !t.done) || (isNote(t) && !(t.attachments || []).length && !(isMeet(t) && mName(t)) && parseOutline(t.notes).every(l => !l.text.trim()))); // separate "Renew …" tasks; journal entries left completely blank
     if (gone.length) { S.tasks = S.tasks.filter(t => !gone.includes(t)); ch++; }

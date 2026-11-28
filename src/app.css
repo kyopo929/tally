@@ -1507,3 +1507,39 @@ body.onko .qa-wrap { display: none; }
 .ko-sortcard { min-height: 220px; }
 .ko-sortacts .chipbtn { min-width: 150px; justify-content: center; }
 .ko-allknown { margin-right: 12px; }
+
+/* Spending */
+.ico-spend { color: #2a9d8f; }
+.sp-nav { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; font-size: 13px; margin-right: 6px; }
+.sp-nav span { min-width: 74px; text-align: center; }
+.sp-nav .iconbtn[disabled] { opacity: .3; cursor: default; }
+.sp-ask { background: var(--sun-soft); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sp-ask .row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.sp-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.sp-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.sp-card span { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.sp-card b { font: 700 22px/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+.sp-card small { color: var(--muted); font-size: 12px; }
+.sp-cats { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.sp-cat { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-align: left; }
+.sp-cat:hover, .sp-cat.on { background: var(--hover); }
+.sp-cat.on .sp-cname { color: var(--accent); font-weight: 600; }
+.sp-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+.sp-bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.sp-amt { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.sp-amt.in { color: #2a9d8f; }
+.sp-day { margin-bottom: 10px; }
+.sp-dayhead { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 600; padding: 6px 8px 4px; }
+.sp-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; margin-bottom: 6px; }
+.sp-row:hover { background: var(--hover); }
+.sp-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sp-what b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-what small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-kind { display: flex; gap: 16px; margin-bottom: 10px; }
+.sp-form .field { margin-bottom: 10px; }
+.chipbtn.danger { color: var(--danger); }
+@media (max-width: 600px) { .sp-cat { grid-template-columns: 96px 1fr auto; } .sp-card b { font-size: 18px; } .sp-nav span { min-width: 64px; } }
+.sp-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.sp-top .chipbtn, .sp-row-btns .chipbtn { display: inline-flex; align-items: center; gap: 5px; }
+.sp-top .chipbtn svg { width: 13px; height: 13px; }
+#spCur { min-width: 86px; }
