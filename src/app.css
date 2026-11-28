@@ -1560,3 +1560,18 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
 .sp-bar i.s1 { background: var(--s1); } .sp-bar i.s2 { background: var(--s2); } .sp-bar i.s3 { background: var(--s3); } .sp-bar i.s4 { background: var(--s4); } .sp-bar i.s5 { background: var(--s5); } .sp-bar i.s6 { background: var(--s6); } .sp-bar i.s7 { background: var(--s7); } .sp-bar i.s8 { background: var(--s8); }
 .sp-pct { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .sp-pcards { grid-template-columns: 1fr 1fr; } .sp-pcards .pcard:first-child { grid-column: 1 / -1; } .sp-cat { grid-template-columns: 110px 1fr 34px auto; } }
+.sa-amt { display: flex; gap: 6px; min-width: 0; }
+.sa-amt #saCur { width: 76px; flex: none; padding-left: 8px; padding-right: 4px; }
+.sa-amt #saAmt { flex: 1; min-width: 0; }
+.sp-addrow { grid-template-columns: 200px 1.5fr 1fr 1fr 150px auto; }
+@media (max-width: 760px) { .sp-addrow { grid-template-columns: 1fr 1fr; } }
+.sp-amt small { display: block; text-align: right; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.sp-top .chipbtn:not(.solid) { margin-left: auto; }
+.sc-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.sc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-row .sc-name { flex: 1; min-width: 140px; }
+.sc-row .hint { min-width: 22px; text-align: right; }
+.sc-del { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.sc-del .sc-to { width: auto; }
+.sc-add { display: flex; gap: 8px; }
+.sc-add .chipbtn { display: inline-flex; align-items: center; gap: 4px; }
