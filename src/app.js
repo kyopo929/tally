@@ -2934,7 +2934,7 @@
     save(); renderSide(); renderMain(); toast('Marked as known: ' + c.title + '. It won’t come up again', true);
   }
   /* ---- audio: the device's own Korean voices; a male voice when the device has one ---- */
-  const koVoices = () => { try { return speechSynthesis.getVoices().filter(v => /^ko/i.test(v.lang)); } catch (e) { return []; } };
+  const koVoices = () => { try { return speechSynthesis.getVoices().filter(v => /^ko([-_]|$)/i.test(v.lang))  /* ko-KR, not kok (Konkani) */; } catch (e) { return []; } };
   function koVoice() {
     const vs = koVoices(); if (!vs.length) return null;
     let pick = ''; try { pick = localStorage.getItem(KO_VOICE_KEY) || ''; } catch (e) { }
@@ -2954,7 +2954,7 @@
     const vs = koVoices(), cur = koVoice();
     if (!vs.length) return '<p class="hint ko-novoice">This device has no Korean voice, so cards are silent. On a Windows computer, Edge has a male Korean voice built in (InJoon). In Chrome: Windows Settings → Time &amp; language → Speech → Add voices → Korean. On Android: Settings → Text-to-speech → Google → Korean.</p>';
     return '<label class="ko-chk">Voice <select class="ctl" id="koVoice">' + vs.map(v => '<option value="' + esc(v.name) + '"' + (cur && v.name === cur.name ? ' selected' : '') + '>' + esc(koVoiceLabel(v)) + '</option>').join('') + '</select><button type="button" class="linkbtn" data-kosay="안녕하세요, 반가워요.">Test</button></label>' +
-      (vs.some(v => KO_MALE.test(v.name)) ? '' : '<span class="hint">No male Korean voice on this device. Open Tally in Microsoft Edge for one (InJoon). On Android, pick a voice in Settings → Text-to-speech → Google → Korean.</span>');
+      (vs.some(v => KO_MALE.test(v.name)) ? '' : '<span class="hint">' + (IS_ANDROID ? 'For a male voice, pick one in Android’s settings: Settings → search “Text-to-speech” → Google (the gear) → Install voice data → Korean, then choose a voice. Tally then uses it.' : 'No male Korean voice on this device. Open Tally in Microsoft Edge for one (InJoon).') + '</span>');
   }
   // The card's word, highlighted in its example sentence (also when the word is a verb like 서운하다 → 서운해서)
   function koMark(ex, front) {
@@ -3028,7 +3028,7 @@
     let h = tabs + koAddHtml() + '<div class="ko-home">';
     h += '<div class="ko-stats"><div class="pcard"><small>To review</small><b>' + td.due.length + '</b><em>' + td.fresh.length + ' new</em></div><div class="pcard"><small>Streak</small><b>' + st + '</b><em>day' + (st === 1 ? '' : 's') + (doneToday ? ' · ' + doneToday + ' today' : '') + '</em></div><div class="pcard"><small>Cards</small><b>' + cs.length + '</b><em>' + (known ? known + ' known · ' : '') + heard + ' tally mark' + (heard === 1 ? '' : 's') + '</em></div></div>';
     if (!cs.length) h += '<div class="ko-go"><p><b>No cards yet.</b> Start with a word pack below, paste a YouTube transcript, or add a word you didn’t catch in the boxes above.</p></div>';
-    else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min · Space shows the answer, 1–4 rate it, K if you already know a new word</span></div>';
+    else if (n) h += '<div class="ko-go"><button type="button" class="chipbtn solid big" data-kostart="1">Review ' + n + ' card' + (n === 1 ? '' : 's') + '</button><span class="hint">About ' + Math.max(1, Math.round(n * 8 / 60)) + ' min' + (isPhone() ? '' : ' · Space shows the answer, 1–4 rate it, K if you already know a new word') + '</span></div>';
     else h += '<div class="ko-go"><p><b>All caught up for today.</b> ' + (td.freshAll ? td.freshAll + ' new card' + (td.freshAll === 1 ? '' : 's') + ' waiting, ' + cfg.newPerDay + ' a day. ' : '') + 'Add the words you didn’t catch tonight and they’ll show up tomorrow.</p>' + (td.freshAll ? '<button type="button" class="chipbtn" data-komore="1">Learn 10 more now</button>' : '') + '</div>';
     const toSort = koSortList().length, blank = cs.filter(c => !(c.ko || {}).back && !(c.ko || {}).known).length;
     const stale = KO_PACKS.filter(p => p.big && (cfg.packs || {})[p.id] && cfg.packs[p.id] !== p.v);
@@ -3039,8 +3039,8 @@
     h += '<div class="ko-opts">' + koVoiceHtml() + '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30, 50].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label><button type="button" class="linkbtn ko-reset" data-koreset-all="1">Reset progress…</button></div>';
     if (koPacksLeft(have).length) h += '<div class="section-head">Word packs</div>' + koPackHtml(have);
     h += '<div class="section-head">Your own words</div><div class="ko-tip"><p><b>From YouTube, for free:</b> under a video click <b>…more</b> → <b>Show transcript</b>, select it all and copy, then <button type="button" class="linkbtn" data-kotr="1">paste the transcript</button>. Tap the lines you didn’t understand and they become cards. Subtitle files (.srt, .vtt) work too.</p>' +
-      '<div class="ko-bm"><p><b>From Netflix, one click:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows the bar): <a class="ko-bmbtn" href="' + esc(koBookmarklet()) + '" data-kobm="1" title="Drag me to your bookmarks bar">+ Tally</a> <button type="button" class="linkbtn" data-kobmcopy="1">or copy it</button></p>' +
-      '<p class="hint">Watch with Korean subtitles on. When you hear something you didn’t catch, pause, press Esc to leave full screen and click <b>+ Tally</b>. Tally opens with the line and the show filled in. It works on YouTube too, and on any page if you select some text first. Browser only, not the Netflix app or a phone.</p></div>' +
+      (isPhone() ? '' : '<div class="ko-bm"><p><b>From Netflix, one click:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows the bar): <a class="ko-bmbtn" href="' + esc(koBookmarklet()) + '" data-kobm="1" title="Drag me to your bookmarks bar">+ Tally</a> <button type="button" class="linkbtn" data-kobmcopy="1">or copy it</button></p>' +
+      '<p class="hint">Watch with Korean subtitles on. When you hear something you didn’t catch, pause, press Esc to leave full screen and click <b>+ Tally</b>. Tally opens with the line and the show filled in. It works on YouTube too, and on any page if you select some text first. Browser only, not the Netflix app or a phone.</p></div>') +
       '<p><b>While watching anything:</b> fill in the boxes at the top. Only the Korean is needed, and Enter adds it. A word you already have gets a tally mark instead. From another page of Tally you can also type <code lang="ko">ko: 어차피 = anyway | 어차피 늦었으니까 천천히 가자 #Squid Game</code> in the main add box.</p>' +
       '<div class="ko-row"><button type="button" class="chipbtn" data-kotr="1">Paste a transcript…</button><button type="button" class="chipbtn" data-kobulk="1">Paste a word list…</button></div></div>';
     const recent = cs.filter(c => (c.ko || {}).src && !KO_PACKS.some(p => p.name === c.ko.src)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
