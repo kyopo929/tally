@@ -1573,6 +1573,21 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
 .sp-bar i.s1 { background: var(--s1); } .sp-bar i.s2 { background: var(--s2); } .sp-bar i.s3 { background: var(--s3); } .sp-bar i.s4 { background: var(--s4); } .sp-bar i.s5 { background: var(--s5); } .sp-bar i.s6 { background: var(--s6); } .sp-bar i.s7 { background: var(--s7); } .sp-bar i.s8 { background: var(--s8); }
 .sp-pct { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .sp-pcards { grid-template-columns: 1fr 1fr; } .sp-pcards .pcard:first-child { grid-column: 1 / -1; } .sp-cat { grid-template-columns: 110px 1fr 34px auto; } }
+.sa-amt { display: flex; gap: 6px; min-width: 0; }
+.sa-amt #saCur { width: 76px; flex: none; padding-left: 8px; padding-right: 4px; }
+.sa-amt #saAmt { flex: 1; min-width: 0; }
+.sp-addrow { grid-template-columns: 200px 1.5fr 1fr 1fr 150px auto; }
+@media (max-width: 760px) { .sp-addrow { grid-template-columns: 1fr 1fr; } }
+.sp-amt small { display: block; text-align: right; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.sp-top .chipbtn:not(.solid) { margin-left: auto; }
+.sc-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.sc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-row .sc-name { flex: 1; min-width: 140px; }
+.sc-row .hint { min-width: 22px; text-align: right; }
+.sc-del { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.sc-del .sc-to { width: auto; }
+.sc-add { display: flex; gap: 8px; }
+.sc-add .chipbtn { display: inline-flex; align-items: center; gap: 4px; }
 
 </style>
 </head>
@@ -9000,7 +9015,7 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
         const r = SP.parseBank(m.text); if (!r) continue;
         if (r.kind === 'in') { skipped.add(key); skip++; continue; } // only spending is tracked
         if (cfg.accts[r.acct] === 'work') { skipped.add(key); skip++; continue; }
-        const cat = cfg.cats[r.name.toLowerCase()] || r.cat;
+        const cat = cfg.cats[r.name.toLowerCase()] || spCatFor(r.cat);
         newTask({ id, type: 'spend', title: r.name, amt: r.amount, cur: r.cur, cat, day: D.toISO(new Date(m.at)), kind: r.kind, via: r.acctLabel, acct: r.acct, key, bank: t.name, createdAt: m.at });
         have.add(id); added++;
         if (!cfg.labels[r.acct]) { cfg.labels[r.acct] = r.acctLabel; spSetCfg({ labels: Object.assign({}, cfg.labels) }); }
@@ -9023,8 +9038,56 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
   function spShiftMonth(ym, n) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
   function spDayLabel(iso) { const T = todayISO(); if (iso === T) return 'Today'; if (iso === D.toISO(D.addDays(new Date(), -1))) return 'Yesterday'; const d = D.fromISO(iso); return D.WD_LONG[d.getDay()].slice(0, 3) + ', ' + D.MON_SHORT[d.getMonth()] + ' ' + d.getDate(); }
   // Category colors: the 7 biggest categories in the chart get their own color, the rest share the 8th
+  // Dollars count at the fixed rate (the dirham is pegged); other currencies are shown apart
+  const SP_USD = 3.67;
+  const spAed = t => { const c = t.cur || 'AED', a = Number(t.amt || 0); return c === 'AED' ? a : c === 'USD' ? Math.round(a * SP_USD * 100) / 100 : null; };
+  // Your categories (Spending → Edit categories). Bank texts are sorted into the built-in kinds, then mapped to yours.
+  const spCats = () => { const l = spCfg().catList; return Array.isArray(l) && l.length ? l : SP.CATS.slice(); };
+  function spCatFor(c) {
+    const cfg = spCfg(), list = spCats(); let x = c;
+    for (let i = 0; i < 5 && cfg.catMap && cfg.catMap[x]; i++) x = cfg.catMap[x]; // renamed or merged
+    return list.includes(x) ? x : 'Uncategorized';
+  }
+  function openSpendCats() {
+    const el = $('#sheet'), n = c => spItems().filter(t => t.cat === c).length;
+    const draw = () => {
+      const list = spCats(), un = n('Uncategorized');
+      el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="scTitle"><div class="sheet-head"><h2 id="scTitle">Categories</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body">' +
+        '<p class="hint" style="margin-top:0">Rename by typing over a name. Bank texts follow your names. Anything Tally can’t place goes in <b>Uncategorized</b> for you to sort.</p>' +
+        '<div class="sc-list">' + list.map((c, i) => '<div class="sc-row" data-sc="' + i + '"><input class="ctl sc-name" value="' + esc(c) + '" aria-label="Category name"><span class="hint">' + (n(c) || '') + '</span>' +
+          (ui.scDel === c ? '<span class="sc-del">' + (n(c) ? 'Move ' + n(c) + ' to <select class="ctl sc-to">' + list.filter(x => x !== c).concat(['Uncategorized']).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '') + '<button type="button" class="chipbtn danger" data-scgo="' + i + '">Remove</button><button type="button" class="linkbtn" data-scno="1">Cancel</button></span>'
+            : '<button type="button" class="iconbtn" data-scdel="' + i + '" aria-label="Remove ' + esc(c) + '" title="Remove">' + I.trash + '</button>') + '</div>').join('') + '</div>' +
+        (un ? '<p class="hint">' + un + ' expense' + (un === 1 ? ' is' : 's are') + ' Uncategorized. Open one in Spending to give it a category.</p>' : '') +
+        '<div class="sc-add"><input class="ctl" id="scNew" placeholder="New category" autocomplete="off"><button type="button" class="chipbtn solid" id="scAdd">' + I.plus + 'Add</button></div></div></div>';
+      el.hidden = false;
+      $('#scAdd').onclick = add; $('#scNew').onkeydown = e => { if (e.key === 'Enter') add(); };
+      el.querySelectorAll('.sc-name').forEach(inp => inp.onchange = () => rename(Number(inp.closest('[data-sc]').dataset.sc), inp.value.trim()));
+      el.querySelectorAll('[data-scdel]').forEach(b => b.onclick = () => { ui.scDel = spCats()[Number(b.dataset.scdel)]; draw(); });
+      el.querySelectorAll('[data-scno]').forEach(b => b.onclick = () => { ui.scDel = null; draw(); });
+      el.querySelectorAll('[data-scgo]').forEach(b => b.onclick = () => { const c = spCats()[Number(b.dataset.scgo)], to = el.querySelector('.sc-to'); remove(c, to ? to.value : 'Uncategorized'); });
+    };
+    const keep = (list, map) => { spSetCfg(Object.assign({ catList: list }, map ? { catMap: map } : {})); save(); renderMain(); setTimeout(draw, 0); }; // after the box that was being edited has let go
+    function add() { const v = $('#scNew').value.trim(); if (!v) return; if (spCats().some(c => c.toLowerCase() === v.toLowerCase())) { toast(v + ' is already there'); return; } snapshot(); keep(spCats().concat([v])); setTimeout(() => $('#scNew') && $('#scNew').focus(), 20); }
+    function rename(i, v) {
+      const list = spCats().slice(), old = list[i]; if (!v || v === old) return;
+      if (list.some(c => c.toLowerCase() === v.toLowerCase())) { toast(v + ' is already there'); setTimeout(draw, 0); return; }
+      snapshot(); list[i] = v;
+      spItems().forEach(t => { if (t.cat === old) t.cat = v; });
+      const cfg = spCfg(), cats = Object.assign({}, cfg.cats); Object.keys(cats).forEach(k => { if (cats[k] === old) cats[k] = v; });
+      const map = Object.assign({}, cfg.catMap || {}); Object.keys(map).forEach(k => { if (map[k] === old) map[k] = v; }); map[old] = v;
+      spSetCfg({ cats }); keep(list, map); toast('Renamed to ' + v, true);
+    }
+    function remove(c, to) {
+      snapshot(); ui.scDel = null;
+      spItems().forEach(t => { if (t.cat === c) { t.cat = to; t.catHand = true; } });
+      const cfg = spCfg(), cats = Object.assign({}, cfg.cats); Object.keys(cats).forEach(k => { if (cats[k] === c) cats[k] = to; });
+      const map = Object.assign({}, cfg.catMap || {}); Object.keys(map).forEach(k => { if (map[k] === c) delete map[k]; }); delete map[c]; // new texts of that kind go to Uncategorized
+      spSetCfg({ cats }); keep(spCats().filter(x => x !== c), map); toast(c + ' removed', true);
+    }
+    draw();
+  }
   function spSlots(xs) {
-    const tot = {}; xs.forEach(t => { tot[t.cat || 'Other'] = (tot[t.cat || 'Other'] || 0) + Number(t.amt || 0); });
+    const tot = {}; xs.forEach(t => { tot[t.cat || 'Other'] = (tot[t.cat || 'Other'] || 0) + spAed(t); });
     const ks = Object.keys(tot).sort((a, b) => tot[b] - tot[a]), keys = ks.length > 8 ? ks.slice(0, 7).concat(['Everything else']) : ks;
     const grp = c => keys.includes(c || 'Other') ? (c || 'Other') : 'Everything else';
     return { keys, grp, slot: k => 's' + (keys.indexOf(k) + 1) };
@@ -9034,9 +9097,9 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
     const cfg = spCfg(), vias = [...new Set(['Cash', 'Card', 'Bank transfer'].concat(Object.entries(cfg.labels).filter(([a]) => cfg.accts[a] === 'personal').map(([, l]) => l)))];
     const last = ui.spVia || 'Cash', day = spMonth() === todayISO().slice(0, 7) ? todayISO() : spMonth() + '-01';
     return '<div class="sp-addrow">' +
-      '<input class="ctl" id="saAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Amount (AED)" aria-label="Amount in AED">' +
+      '<div class="sa-amt"><select class="ctl" id="saCur" aria-label="Currency">' + ['AED', 'USD'].map(c => '<option' + (c === (ui.spCur || 'AED') ? ' selected' : '') + '>' + c + '</option>').join('') + '</select><input class="ctl" id="saAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Amount" aria-label="Amount"></div>' +
       '<input class="ctl" id="saWhat" placeholder="What or where" autocomplete="off" aria-label="What or where">' +
-      '<select class="ctl" id="saCat" aria-label="Category">' + SP.CATS.map(c => '<option' + (c === 'Other' ? ' selected' : '') + '>' + c + '</option>').join('') + '</select>' +
+      '<select class="ctl" id="saCat" aria-label="Category"><option value="">Category\u2026</option>' + spCats().map(c => '<option>' + esc(c) + '</option>').join('') + '</select>' +
       '<select class="ctl" id="saVia" aria-label="Paid with">' + vias.map(v => '<option' + (v === last ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select>' +
       '<input class="ctl" id="saDay" type="date" value="' + day + '" aria-label="Date">' +
       '<button type="button" class="chipbtn solid" data-saadd="1">' + I.plus + 'Add</button></div>';
@@ -9045,16 +9108,16 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
     const amt = Number($('#saAmt').value), what = $('#saWhat').value.trim();
     if (!(amt > 0)) { $('#saAmt').focus(); toast('Enter the amount'); return; }
     if (!what) { $('#saWhat').focus(); toast('What was it for?'); return; }
-    snapshot(); ui.spVia = $('#saVia').value;
-    const cat = $('#saCat').value;
-    newTask({ type: 'spend', title: what.charAt(0).toUpperCase() + what.slice(1), amt, cur: 'AED', cat, day: $('#saDay').value || todayISO(), kind: 'out', via: ui.spVia });
+    const cat = $('#saCat').value; if (!cat) { $('#saCat').focus(); toast('Pick a category'); return; }
+    snapshot(); ui.spVia = $('#saVia').value; ui.spCur = $('#saCur').value;
+    newTask({ type: 'spend', title: what.charAt(0).toUpperCase() + what.slice(1), amt, cur: ui.spCur, cat, day: $('#saDay').value || todayISO(), kind: 'out', via: ui.spVia });
     if (ui.spCatPicked) spSetCfg({ cats: Object.assign({}, spCfg().cats, { [what.toLowerCase()]: cat }) }); // you chose it: next time it's guessed
-    ui.spCatPicked = false; save(); render(); toast('Added ' + what.charAt(0).toUpperCase() + what.slice(1) + ', ' + spMoney(amt), true);
+    ui.spCatPicked = false; save(); render(); toast('Added ' + what.charAt(0).toUpperCase() + what.slice(1) + ', ' + spMoney(amt, ui.spCur), true);
     setTimeout(() => { const a = $('#saAmt'); if (a) a.focus(); }, 30);
   }
   function renderSpend() {
     const ym = spMonth(), cfg = spCfg(), all = spItems().filter(t => t.kind !== 'in');
-    let html = '<div class="sp-top"><div class="sp-nav"><button type="button" class="iconbtn" data-spm="-1" aria-label="Previous month">' + I.left + '</button><span>' + esc(spMonthName(ym)) + '</span><button type="button" class="iconbtn" data-spm="1" aria-label="Next month"' + (ym >= todayISO().slice(0, 7) ? ' disabled' : '') + '>' + I.right + '</button></div></div>';
+    let html = '<div class="sp-top"><div class="sp-nav"><button type="button" class="iconbtn" data-spm="-1" aria-label="Previous month">' + I.left + '</button><span>' + esc(spMonthName(ym)) + '</span><button type="button" class="iconbtn" data-spm="1" aria-label="Next month"' + (ym >= todayISO().slice(0, 7) ? ' disabled' : '') + '>' + I.right + '</button></div><button type="button" class="chipbtn" data-spcats="1">Edit categories</button></div>';
     html += spAddHtml();
     // New cards and accounts from the bank: yours or work?
     const ask = [...new Set(all.filter(t => t.acct && !cfg.accts[t.acct]).map(t => t.acct))];
@@ -9063,16 +9126,16 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
       html += '<div class="sp-ask"><div><b>' + esc(cfg.labels[a] || l.via) + '</b> from ' + esc(l.bank || 'your bank') + ': ' + xs.length + ' transaction' + (xs.length === 1 ? '' : 's') + ', latest ' + esc(l.title) + ' ' + esc(spMoney(l.amt, l.cur)) + '. Is this card or account yours or work?</div>' +
         '<div class="row-btns"><button type="button" class="chipbtn solid" data-spacct="' + esc(a) + '" data-who="personal">Personal</button><button type="button" class="chipbtn" data-spacct="' + esc(a) + '" data-who="work">Work (skip it)</button></div></div>';
     });
-    const mine = all.filter(spMine), aed = t => (t.cur || 'AED') === 'AED';
+    const mine = all.filter(spMine), aed = t => spAed(t) !== null;
     const xs = mine.filter(t => (t.day || '').slice(0, 7) === ym);
-    const total = xs.filter(aed).reduce((a, t) => a + Number(t.amt || 0), 0);
-    const curs = [...new Set(xs.map(t => t.cur || 'AED'))].filter(c => c !== 'AED');
+    const total = xs.filter(aed).reduce((a, t) => a + spAed(t), 0);
+    const curs = [...new Set(xs.filter(t => !aed(t)).map(t => t.cur))]; // currencies without a rate: shown apart
     // 6 months up to the one you're looking at
     const months = []; for (let i = 5; i >= 0; i--) months.push(spShiftMonth(ym, -i));
     const range = mine.filter(t => aed(t) && months.includes((t.day || '').slice(0, 7)));
-    const S6 = spSlots(range), mTot = m => range.filter(t => t.day.slice(0, 7) === m).reduce((a, t) => a + Number(t.amt || 0), 0);
+    const S6 = spSlots(range), mTot = m => range.filter(t => t.day.slice(0, 7) === m).reduce((a, t) => a + spAed(t), 0);
     const used = months.filter(m => mTot(m) > 0), avg = used.length ? used.reduce((a, m) => a + mTot(m), 0) / used.length : 0;
-    const byCat = {}; xs.filter(aed).forEach(t => { byCat[t.cat || 'Other'] = (byCat[t.cat || 'Other'] || 0) + Number(t.amt || 0); });
+    const byCat = {}; xs.filter(aed).forEach(t => { byCat[t.cat || 'Other'] = (byCat[t.cat || 'Other'] || 0) + spAed(t); });
     const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
     html += '<div class="pcards sp-pcards"><div class="pcard"><small>Spent in ' + esc(spMonthName(ym)) + '</small><b>' + esc(spMoney(total)) + '</b><em>' + xs.length + ' item' + (xs.length === 1 ? '' : 's') + (curs.length ? ' · plus ' + curs.map(c => esc(spMoney(xs.filter(t => t.cur === c).reduce((a, t) => a + Number(t.amt || 0), 0), c))).join(', ') : '') + '</em></div>' +
       '<div class="pcard"><small>Monthly average</small><b>' + esc(spMoney(avg)) + '</b><em>' + (used.length ? 'over ' + used.length + ' month' + (used.length === 1 ? '' : 's') : 'not enough yet') + '</em></div>' +
@@ -9089,7 +9152,7 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
       for (let i = 0; i <= steps; i++) { const v = top * i / steps; g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + kf(v) + '</text>'; }
       months.forEach((m, i) => {
         const x = L + cw * i + (cw - bw) / 2, [yy, mm] = m.split('-').map(Number), cell = {};
-        range.filter(t => t.day.slice(0, 7) === m).forEach(t => { const k = S6.grp(t.cat); cell[k] = (cell[k] || 0) + Number(t.amt || 0); });
+        range.filter(t => t.day.slice(0, 7) === m).forEach(t => { const k = S6.grp(t.cat); cell[k] = (cell[k] || 0) + spAed(t); });
         const present = S6.keys.filter(k => cell[k] > 0); let base = 0;
         present.forEach((k, j) => { const v = cell[k], hh = y(base) - y(base + v); g += '<path class="' + S6.slot(k) + '" d="' + barPath(x, y(base + v) + (base ? 1 : 0), bw, Math.max(0, hh - (base ? 1 : 0)), j === present.length - 1) + '"/>'; base += v; });
         g += '<text class="ax' + (m === ym ? ' cur' : '') + '" x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + D.MON_SHORT[mm - 1] + (mm === 1 || i === 0 ? ' ’' + String(yy).slice(2) : '') + '</text>';
@@ -9111,20 +9174,20 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
     const shown = xs.filter(t => !ui.spCat || (t.cat || 'Other') === ui.spCat).sort((a, b) => (b.day || '').localeCompare(a.day || '') || b.createdAt - a.createdAt);
     const days = [...new Set(shown.map(t => t.day))];
     html += '<div class="section"><div class="section-head">' + (ui.spCat ? esc(ui.spCat) + ' <button type="button" class="sect-act" data-spcat="">Show all</button>' : 'Every expense') + '</div>' + days.map(d => {
-      const ds = shown.filter(t => t.day === d), tot = ds.filter(aed).reduce((a, t) => a + Number(t.amt || 0), 0);
+      const ds = shown.filter(t => t.day === d), tot = ds.filter(aed).reduce((a, t) => a + spAed(t), 0);
       return '<div class="sp-day"><div class="sp-dayhead"><span>' + esc(spDayLabel(d)) + '</span>' + (tot ? '<span>' + esc(spMoney(tot)) + '</span>' : '') + '</div>' + ds.map(t =>
-        '<button type="button" class="sp-row" data-spedit="' + esc(t.id) + '"><span class="sp-what"><b>' + esc(t.title) + '</b><small>' + esc(t.cat || 'Other') + (t.via ? ' · ' + esc(t.via) : '') + (t.note ? ' · ' + esc(t.note) : '') + '</small></span><span class="sp-amt">' + esc(spMoney(t.amt, t.cur)) + '</span></button>').join('') + '</div>';
+        '<button type="button" class="sp-row" data-spedit="' + esc(t.id) + '"><span class="sp-what"><b>' + esc(t.title) + '</b><small>' + esc(t.cat || 'Other') + (t.via ? ' · ' + esc(t.via) : '') + (t.note ? ' · ' + esc(t.note) : '') + '</small></span><span class="sp-amt">' + esc(spMoney(t.amt, t.cur)) + ((t.cur || 'AED') !== 'AED' && spAed(t) !== null ? '<small>\u2248 ' + esc(spMoney(spAed(t))) + '</small>' : '') + '</span></button>').join('') + '</div>';
     }).join('') + '</div>';
     return { title: 'Spending', sub: '', actions: '', html };
   }
   function openSpendEdit(id) {
-    const t = id === 'new' ? null : taskById(id), x = t || { title: '', amt: '', cur: 'AED', cat: 'Other', day: todayISO(), kind: 'out', via: 'Cash', note: '' };
+    const t = id === 'new' ? null : taskById(id), x = t || { title: '', amt: '', cur: 'AED', cat: spCats()[0], day: todayISO(), kind: 'out', via: 'Cash', note: '' };
     const cfg = spCfg(), vias = [...new Set(['Cash', 'Card', 'Bank transfer'].concat(Object.entries(cfg.labels).filter(([a]) => cfg.accts[a] === 'personal').map(([, l]) => l)))];
     const el = $('#sheet');
     el.innerHTML = '<div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="spTitle"><div class="sheet-head"><h2 id="spTitle">' + (t ? 'Edit' : 'Add spending') + '</h2><button type="button" class="iconbtn" data-close="1" aria-label="Close">' + I.x + '</button></div><div class="sheet-body sp-form">' +
-      '<div class="field"><label for="spAmt">Amount</label><div style="display:flex;gap:8px"><select class="ctl" id="spCur" style="width:auto">' + ['AED', 'USD', 'EUR', 'GBP', 'KRW'].concat(['AED', 'USD', 'EUR', 'GBP', 'KRW'].includes(x.cur) ? [] : [x.cur]).map(c => '<option' + (c === x.cur ? ' selected' : '') + '>' + c + '</option>').join('') + '</select><input class="ctl" id="spAmt" type="number" inputmode="decimal" step="0.01" min="0" value="' + esc(x.amt) + '"></div></div>' +
+      '<div class="field"><label for="spAmt">Amount</label><div style="display:flex;gap:8px"><select class="ctl" id="spCur" style="width:auto">' + ['AED', 'USD'].concat(['AED', 'USD'].includes(x.cur) ? [] : [x.cur]).map(c => '<option' + (c === x.cur ? ' selected' : '') + '>' + c + '</option>').join('') + '</select><input class="ctl" id="spAmt" type="number" inputmode="decimal" step="0.01" min="0" value="' + esc(x.amt) + '"></div></div>' +
       '<div class="field"><label for="spWhat">What or where</label><input class="ctl" id="spWhat" value="' + esc(x.title) + '" placeholder="Lunch, Carrefour…"></div>' +
-      '<div class="field"><label for="spCatSel">Category</label><select class="ctl" id="spCatSel">' + SP.CATS.map(c => '<option' + (c === x.cat ? ' selected' : '') + '>' + c + '</option>').join('') + '</select>' + (t && t.key ? '<span class="hint">Changing it also sorts future texts from ' + esc(x.title) + '.</span>' : '') + '</div>' +
+      '<div class="field"><label for="spCatSel">Category</label><select class="ctl" id="spCatSel">' + spCats().concat(spCats().includes(x.cat) ? [] : [x.cat || 'Uncategorized']).map(c => '<option' + (c === x.cat ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select>' + (t && t.key ? '<span class="hint">Changing it also sorts future texts from ' + esc(x.title) + '.</span>' : '') + '</div>' +
       '<div class="field"><label for="spDay">Date</label><input class="ctl" id="spDay" type="date" value="' + esc(x.day) + '"></div>' +
       '<div class="field"><label for="spVia">Paid with</label><input class="ctl" id="spVia" list="spVias" value="' + esc(x.via || '') + '"><datalist id="spVias">' + vias.map(v => '<option value="' + esc(v) + '">').join('') + '</datalist></div>' +
       '<div class="field"><label for="spNote">Note</label><input class="ctl" id="spNote" value="' + esc(x.note || '') + '"></div>' +
@@ -9158,6 +9221,7 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
       const a = e.target.closest('[data-spacct]'); if (a) { spSetAcct(a.dataset.spacct, a.dataset.who); return; }
       const ed = e.target.closest('[data-spedit]'); if (ed) { openSpendEdit(ed.dataset.spedit); return; }
       if (e.target.closest('[data-saadd]')) { spAddFromRow(); return; }
+      if (e.target.closest('[data-spcats]')) { openSpendCats(); return; }
       const go = e.target.closest('[data-spgo]'); if (go) { ui.spMonth = go.dataset.spgo; ui.spCat = null; renderMain(); return; }
     });
     $('#content').addEventListener('keydown', e => { if (ui.view === 'spend' && e.key === 'Enter' && e.target.closest && e.target.closest('.sp-addrow')) { e.preventDefault(); spAddFromRow(); } });
@@ -9166,7 +9230,7 @@ body.onspend .qamode, body.onspend .qa-wrap { display: none; }
     $('#content').addEventListener('input', e => {
       if (ui.view !== 'spend' || e.target.id !== 'saWhat' || ui.spCatPicked) return;
       const w = e.target.value.trim().toLowerCase(); if (!w) return;
-      const learned = spCfg().cats[w]; $('#saCat').value = learned || SP.categorize(w);
+      const learned = spCfg().cats[w], g = learned && spCats().includes(learned) ? learned : spCatFor(SP.categorize(w)); $('#saCat').value = g === 'Uncategorized' ? '' : g;
     });
     if (!PAY_ON) $('#content').addEventListener('mousemove', e => { // the chart's tooltip (Payments has the same one where it's on)
       if (ui.view !== 'spend') return;
