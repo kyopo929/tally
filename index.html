@@ -5459,14 +5459,16 @@ body.onko .qa-wrap { display: none; }
     for (const w of tries) { const i = e.indexOf(w); if (i >= 0) return esc(e.slice(0, i)) + '<mark>' + esc(e.slice(i, i + w.length)) + '</mark>' + esc(e.slice(i + w.length)); }
     return esc(e);
   }
-  function koPackHtml(have) {
+  // Only the packs you haven't added: once a pack is in, there's nothing more to do with it here
+  function koPacksLeft(have) {
     const done = koCfg().packs || {};
-    return '<div class="ko-packs">' + KO_PACKS.map(p => {
-      if (p.big) return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + p.count.toLocaleString() + ' words</span></div>' +
-        (done[p.id] === p.v ? '<span class="ko-added">' + I.check + 'Added</span>' : done[p.id] ? '<span class="ko-added">' + I.check + 'Added (older list)</span>' : '<button type="button" class="chipbtn" data-kopack="' + p.id + '">Add ' + p.count.toLocaleString() + '</button>') + '</div>';
-      const left = p.cards.filter(c => !have.has(koKey(c.front))).length;
-      return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + p.cards.length + ' words</span></div>' +
-        (left ? '<button type="button" class="chipbtn' + (have.size ? '' : ' solid') + '" data-kopack="' + p.id + '">Add ' + left + '</button>' : '<span class="ko-added">' + I.check + 'Added</span>') + '</div>';
+    return KO_PACKS.filter(p => p.big ? !done[p.id] : p.cards.some(c => !have.has(koKey(c.front))));
+  }
+  function koPackHtml(have) {
+    return '<div class="ko-packs">' + koPacksLeft(have).map(p => {
+      const n = p.big ? p.count : p.cards.filter(c => !have.has(koKey(c.front))).length;
+      return '<div class="ko-pack"><div><b>' + esc(p.name) + '</b><span>' + esc(p.about) + ' · ' + (p.big ? p.count : p.cards.length).toLocaleString() + ' words</span></div>' +
+        '<button type="button" class="chipbtn' + (have.size ? '' : ' solid') + '" data-kopack="' + p.id + '">Add ' + n.toLocaleString() + '</button></div>';
     }).join('') + '</div>';
   }
   /* ---- the "+ Tally" bookmark: on Netflix (or YouTube) it takes the subtitle on screen and the show's name and opens Tally with them filled in.
@@ -5531,7 +5533,7 @@ body.onko .qa-wrap { display: none; }
       (toSort ? '<div class="ko-tool"><div><b>Quick sort</b><span>' + toSort.toLocaleString() + ' new word' + (toSort === 1 ? '' : 's') + ' you haven’t seen yet. Mark the ones you already know so reviews only hold real gaps. About 2 seconds a word.</span></div><button type="button" class="chipbtn solid" data-kosort="1">Sort words</button></div>' : '') +
       (blank ? '<div class="ko-tool"><div><b>' + blank + ' card' + (blank === 1 ? '' : 's') + ' without a meaning</b><span>Copy them, paste into a chat with Claude, then paste the answer back.</span></div><button type="button" class="chipbtn" data-komeancopy="1">Copy for Claude</button><button type="button" class="chipbtn" data-komeanpaste="1">Paste meanings</button></div>' : '') + '</div>';
     h += '<div class="ko-opts">' + koVoiceHtml() + '<label class="ko-chk">New cards a day <select class="ctl" data-kocfg="newPerDay">' + [5, 10, 15, 20, 30, 50].map(x => '<option' + (cfg.newPerDay === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label><button type="button" class="linkbtn ko-reset" data-koreset-all="1">Reset progress…</button></div>';
-    h += '<div class="section-head">Word packs</div>' + koPackHtml(have);
+    if (koPacksLeft(have).length) h += '<div class="section-head">Word packs</div>' + koPackHtml(have);
     h += '<div class="section-head">Your own words</div><div class="ko-tip"><p><b>From YouTube, for free:</b> under a video click <b>…more</b> → <b>Show transcript</b>, select it all and copy, then <button type="button" class="linkbtn" data-kotr="1">paste the transcript</button>. Tap the lines you didn’t understand and they become cards. Subtitle files (.srt, .vtt) work too.</p>' +
       '<div class="ko-bm"><p><b>From Netflix, one click:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows the bar): <a class="ko-bmbtn" href="' + esc(koBookmarklet()) + '" data-kobm="1" title="Drag me to your bookmarks bar">+ Tally</a> <button type="button" class="linkbtn" data-kobmcopy="1">or copy it</button></p>' +
       '<p class="hint">Watch with Korean subtitles on. When you hear something you didn’t catch, pause, press Esc to leave full screen and click <b>+ Tally</b>. Tally opens with the line and the show filled in. It works on YouTube too, and on any page if you select some text first. Browser only, not the Netflix app or a phone.</p></div>' +
