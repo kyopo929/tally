@@ -4808,8 +4808,8 @@
       const d = describeDoc(src.text); let hold = d.holder; if (isMe(hold)) hold = '';
       seen.add(src.k);
       let e = list.find(x => x.k === src.k);
-      if (!e) { e = { k: src.k, file: src.file, date, title: d.kind ? d.title : '', holder: hold }; list.push(e); found.push({ name: expDocName(t, e), date }); }
-      else if (!e.no && (e.date !== date || (d.kind && e.title !== d.title) || (hold && e.holder !== hold))) { e.date = date; if (d.kind) e.title = d.title; if (hold) e.holder = hold; e.file = src.file; found.push({ name: expDocName(t, e), date }); }
+      if (!e) { e = { k: src.k, file: src.file, date, title: d.kind ? d.title : '', holder: hold }; list.push(e); found.push({ name: expDocName(t, e), date, k: src.k }); }
+      else if (!e.no && (e.date !== date || (d.kind && e.title !== d.title) || (hold && e.holder !== hold))) { e.date = date; if (d.kind) e.title = d.title; if (hold) e.holder = hold; e.file = src.file; found.push({ name: expDocName(t, e), date, k: src.k }); }
     }
     list.forEach(e => { if (e.holder && isMe(e.holder)) e.holder = ''; }); // your own name isn't shown
     // a file that was deleted or archived takes its task with it
@@ -4823,7 +4823,10 @@
     // the same document photographed twice (front and back) gets one task
     list.forEach((e, i) => placeDocTask(t, e, !e.no && list.slice(0, i).some(o => !o.no && o.date === e.date && expDocName(t, o) === expDocName(t, e))));
     if (list.length) t.expDocs = list; else delete t.expDocs;
-    return found;
+    // Only announce a document's expiry date once, even if it's worked out again later (a name read differently, a file seen again)
+    const told = t.expTold || {}, fresh = found.filter(f => told[f.k] !== f.date);
+    found.forEach(f => { told[f.k] = f.date; }); t.expTold = told;
+    return fresh;
   }
   function autoExpiryScan() {
     const found = [], backOnly = []; let moved = 0, fixed = 0;
@@ -4833,7 +4836,7 @@
       if (!isDoc(t) || t.archived || shut(t) || t.expNo || (t.expires && !t.expAuto)) continue; // notes too: a passport or visa photo in a note still gets its expiry task
       if (t.expAuto && t.titleAuto === undefined && KIND_NAMES.includes(t.title)) t.titleAuto = true; // named by an earlier version
       if (t.holderAuto && t.holder && isMe(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; }
-      if (t.holderAuto && t.holder && !plausibleName(t.holder)) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; } // a misread name from before
+      if (t.holderAuto && t.holder && !plausibleName(t.holder.trim().split(/\s+/)[0])) { t.holder = ''; t.holderAuto = false; retitleTasks(t); fixed++; } // a misread name from before
       if (isDoc(t) && t.keepId && t.expAuto && !t.docByHand && !t.movedBack) { t.type = 'note'; t.movedBack = true; moved++; backOnly.push(t); } // an earlier version moved these on its own; the user moves them by hand
       const r = detectExpiry(t); if (!r.date) continue;
       const d = r.desc; let changed = false;
@@ -4842,14 +4845,16 @@
       // No readable first name? Another passport with the same birth date is the same person
       const twin = !d.holder && t.dob && S.tasks.find(x => x !== t && isPaper(x) && x.dob === t.dob && (x.holder || '').trim());
       let hold = d.holder || (twin ? twin.holder.trim() : ''); if (isMe(hold)) hold = '';
-      if (hold && (!t.holder ? !t.holderAuto || twin : t.holderAuto) && hold !== t.holder) { t.holder = hold; t.holderAuto = true; changed = true; }
+      if (hold && plausibleName(hold.split(/\s+/)[0]) && (!t.holder ? !t.holderAuto || twin : t.holderAuto) && hold !== t.holder) { t.holder = hold; t.holderAuto = true; changed = true; }
       if (r.date === t.expires && !changed && (t.expTaskId || r.date < todayISO())) continue;
       setExpiry(t, r.date); t.expAuto = true; if (!found.includes(t)) found.push(t);
     }
     if (foundNotes.length) { save(); render(); toast((foundNotes.length === 1 ? 'Found ' + foundNotes[0].name + ': expires ' + fmtLong(foundNotes[0].date) : 'Found ' + foundNotes.length + ' expiry dates') + '. Tasks added.', true); }
     if ((fixed || moved) && !found.length) { save(); render(); }
     if (moved && !found.length) toast(moved + ' note' + (moved === 1 ? ' was' : 's were') + ' put back in Notes. Move them to Important Documents yourself if you want.', true);
-    if (found.length) { save(); render(); toast((found.length === 1 ? 'Found ' + docName(found[0]) + ': expires ' + fmtLong(found[0].expires) : 'Found ' + found.length + ' expiry dates') + '. Tasks added' + (moved ? '. Notes moved to Important Documents earlier were put back in Notes' : '') + '.', true); }
+    if (found.length) { save(); render(); }
+    const news = found.filter(t => t.expTold !== t.expires); found.forEach(t => { t.expTold = t.expires; }); // announced once per date
+    if (news.length) { save(); toast((news.length === 1 ? 'Found ' + docName(news[0]) + ': expires ' + fmtLong(news[0].expires) : 'Found ' + news.length + ' expiry dates') + '. Tasks added' + (moved ? '. Notes moved to Important Documents earlier were put back in Notes' : '') + '.', true); }
     return found.length + foundNotes.length;
   }
 
@@ -6206,7 +6211,7 @@
     let h = '';
     if (ppl.length) h += '<div class="section"><div class="section-head">Messages to answer <span class="n">' + ppl.length + '</span></div><div class="msgs">' + ppl.map(msgRow).join('') + '</div></div>';
     if (biz.length) {
-      const shown = !!ui.showDone.msgbiz;
+      const shown = ui.showDone.msgbiz !== false; // open unless you fold it
       h += '<div class="section"><div class="section-head"><button type="button" data-done-toggle="msgbiz" aria-expanded="' + shown + '">' + I.chev + 'Other texts <span class="n">' + biz.length + '</span></button>' +
         (shown ? '<button type="button" class="sect-act" data-msgclear="1">Clear all</button>' : '') + '</div>' + (shown ? '<div class="msgs">' + biz.map(msgRow).join('') + '</div>' : '') + '</div>';
     }
